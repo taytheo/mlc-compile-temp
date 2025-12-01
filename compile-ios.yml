@@ -1,0 +1,41 @@
+name: Compile MLC-LLM for iOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  compile-ios:
+    runs-on: macos-14
+    
+    steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install MLC-LLM
+      run: |
+        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly mlc-ai-nightly
+        pip install huggingface_hub
+        
+    - name: Download Qwen3-4B MLC
+      run: |
+        huggingface-cli download mlc-ai/Qwen3-4B-q4f16_1-MLC --local-dir ./model
+        
+    - name: Compile for iOS (prefill=128, context=4096)
+      run: |
+        mkdir -p ./output
+        mlc_llm compile ./model/mlc-chat-config.json \
+          --device iphone \
+          --overrides "prefill_chunk_size=128;context_window_size=4096;max_batch_size=1" \
+          --output ./output/model-iphone.tar
+        cd ./output && tar -xvf model-iphone.tar
+        ls -lh
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-libs
+        path: |
+          ./output/lib0.o
+          ./output/devc.o
