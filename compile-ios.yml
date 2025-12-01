@@ -10,7 +10,64 @@ on:
       context_window_size:
         description: 'Context window size (default: 4096)'
         required: false
-        default: '4096'
+        default: '4096'name: Compile MLC-LLM for iOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  compile-ios:
+    runs-on: macos-14
+    timeout-minutes: 90
+    
+    steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install Rust
+      uses: dtolnay/rust-action@stable
+      
+    - name: Clone and Build MLC-LLM
+      run: |
+        git clone --recursive https://github.com/mlc-ai/mlc-llm.git
+        cd mlc-llm
+        mkdir -p build && cd build
+        python ../cmake/gen_cmake_config.py
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(sysctl -n hw.ncpu)
+        
+    - name: Download Model
+      run: |
+        pip install huggingface_hub
+        huggingface-cli download mlc-ai/Qwen3-4B-q4f16_1-MLC --local-dir ./model
+        
+    - name: Compile for iOS
+      run: |
+        cd mlc-llm
+        export PYTHONPATH=$(pwd)/python:$PYTHONPATH
+        
+        python -m mlc_llm gen_config ../model \
+          --quantization q4f16_1 \
+          --prefill-chunk-size 128 \
+          --context-window-size 4096 \
+          --max-batch-size 1 \
+          --conv-template qwen2 \
+          --output ../config
+        
+        python -m mlc_llm compile ../config/mlc-chat-config.json \
+          --device iphone \
+          --output ../output.tar
+        
+        cd .. && tar -xvf output.tar
+        ls -la *.o
+        
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-libs
+        path: "*.o"
 
 jobs:
   compile-ios:
