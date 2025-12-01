@@ -50,6 +50,26 @@ jobs:
         
         ninja -j$(sysctl -n hw.ncpu)
         
+    - name: Find and setup library paths
+      id: libpaths
+      run: |
+        cd mlc-llm/build
+        
+        echo "=== All dylib files ==="
+        find . -name "*.dylib" 2>/dev/null
+        
+        echo "=== Looking for libtvm ==="
+        find . -name "libtvm*.dylib" 2>/dev/null || echo "not found in build"
+        find .. -name "libtvm*.dylib" 2>/dev/null | head -10
+        
+        # Get the build directory absolute path
+        BUILD_PATH=$(pwd)
+        echo "BUILD_PATH=$BUILD_PATH" >> $GITHUB_OUTPUT
+        
+        # List all files in build directory
+        echo "=== Build directory contents ==="
+        ls -la
+        
     - name: Download Original Qwen3-4B Model
       run: |
         python -c "
@@ -61,8 +81,66 @@ jobs:
         ls -la ./qwen3-4b-base/
         
     - name: Convert and Compile for iOS
+      env:
+        TVM_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build
+        TVM_FFI_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build
+        DYLD_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build
       run: |
         cd mlc-llm
+        
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$PYTHONPATH
+        
+        echo "=== Environment check ==="
+        echo "TVM_LIBRARY_PATH: $TVM_LIBRARY_PATH"
+        echo "PYTHONPATH: $PYTHONPATH"
+        
+        echo "=== Checking library files ==="
+        ls -la $TVM_LIBRARY_PATH/*.dylib 2>/dev/null || echo "No dylib directly in build"
+        find $TVM_LIBRARY_PATH -name "*.dylib" | head -10
+        
+        mkdir -p ../output
+        
+        # Step 1: Generate config
+        python -m mlc_llm gen_config ../qwen3-4b-base \
+          --quantization q4f16_1 \
+          --prefill-chunk-size 128 \
+          --context-window-size 4096 \
+          --max-batch-size 1 \
+          --conv-template qwen2 \
+          --output ../output/config
+        
+        echo "=== Generated config ==="
+        cat ../output/config/mlc-chat-config.json
+        
+        # Step 2: Convert weights
+        python -m mlc_llm convert_weight ../qwen3-4b-base \
+          --quantization q4f16_1 \
+          --output ../output/weights
+        
+        # Step 3: Compile for iOS
+        python -m mlc_llm compile ../output/config/mlc-chat-config.json \
+          --device iphone \
+          --output ../output/model-iphone.tar
+        
+    - name: Extract compiled files
+      run: |
+        cd output
+        tar -xvf model-iphone.tar
+        
+        echo "=== Compiled iOS libraries ==="
+        ls -lh *.o 2>/dev/null || echo "No .o files"
+        
+        echo "=== Config check ==="
+        grep -E "prefill|context_window" config/mlc-chat-config.json
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-compiled-libs
+        path: |
+          output/*.o
+          output/config/mlc-chat-config.json
+        retention-days: 30        cd mlc-llm
         
         export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$PYTHONPATH
         export TVM_LIBRARY_PATH=$(pwd)/build
