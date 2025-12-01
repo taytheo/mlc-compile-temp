@@ -7,6 +7,8 @@ jobs:
   compile-ios:
     runs-on: macos-14
     timeout-minutes: 120
+    env:
+      MLC_LLM_HOME: /Users/runner/work/mlc-compile-temp/mlc-compile-temp/mlc-llm
     
     steps:
     - name: Setup Python
@@ -25,6 +27,9 @@ jobs:
     - name: Clone MLC-LLM
       run: |
         git clone --recursive https://github.com/mlc-ai/mlc-llm.git
+        cd mlc-llm
+        ls -la
+        ls -la 3rdparty/tvm/
         
     - name: Build MLC-LLM
       run: |
@@ -50,32 +55,19 @@ jobs:
         
         ninja -j$(sysctl -n hw.ncpu)
         
-    - name: Setup Python paths
+        echo "=== Built libraries ==="
+        find . -name "*.dylib" -o -name "*.so" | head -20
+        ls -la *.dylib 2>/dev/null || echo "No dylib in current dir"
+        ls -la lib*.* 2>/dev/null || echo "No lib files"
+        
+    - name: Verify build outputs
       run: |
-        cd mlc-llm
+        cd mlc-llm/build
+        echo "=== All built files ==="
+        ls -la
         
-        # Find all Python paths needed
-        echo "Setting up Python paths..."
-        
-        MLC_PYTHON=$(pwd)/python
-        TVM_PYTHON=$(pwd)/3rdparty/tvm/python
-        TVM_FFI_PYTHON=$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python
-        
-        # Create a file with paths for other steps
-        echo "export PYTHONPATH=$MLC_PYTHON:$TVM_PYTHON:$TVM_FFI_PYTHON:\$PYTHONPATH" > ../python_paths.sh
-        echo "export TVM_LIBRARY_PATH=$(pwd)/build" >> ../python_paths.sh
-        
-        cat ../python_paths.sh
-        
-    - name: Verify MLC-LLM installation
-      run: |
-        source python_paths.sh
-        cd mlc-llm
-        
-        python -c "import tvm_ffi; print('tvm_ffi OK')"
-        python -c "import tvm; print('TVM OK')"
-        python -c "import mlc_llm; print('MLC-LLM OK')"
-        python -m mlc_llm --help | head -10
+        echo "=== Looking for tvm libraries ==="
+        find .. -name "libtvm*.dylib" -o -name "libtvm*.so" 2>/dev/null | head -20
         
     - name: Download Model
       run: |
@@ -83,13 +75,52 @@ jobs:
         huggingface-cli download mlc-ai/Qwen3-4B-q4f16_1-MLC --local-dir ./model
         cat ./model/mlc-chat-config.json
         
-    - name: Generate config with small buffers
+    - name: Generate config and Compile for iOS
       run: |
-        source python_paths.sh
         cd mlc-llm
         
-        mkdir -p ../config
+        # Set all necessary paths
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$PYTHONPATH
+        export TVM_LIBRARY_PATH=$(pwd)/build
+        export MLC_LLM_BUILD_PATH=$(pwd)/build
         
+        # Debug: Check if libraries exist
+        echo "=== Checking library paths ==="
+        ls -la $(pwd)/build/libtvm* 2>/dev/null || echo "No libtvm in build"
+        ls -la $(pwd)/build/libmlc* 2>/dev/null || echo "No libmlc in build"
+        
+        # Try to find the actual library location
+        echo "=== Finding all .dylib files ==="
+        find $(pwd) -name "*.dylib" 2>/dev/null | head -30
+        
+        # Verify Python can import
+        echo "=== Testing imports ==="
+        python -c "
+        import sys
+        sys.path.insert(0, '$(pwd)/python')
+        sys.path.insert(0, '$(pwd)/3rdparty/tvm/python')
+        sys.path.insert(0, '$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python')
+        
+        import os
+        os.environ['TVM_LIBRARY_PATH'] = '$(pwd)/build'
+        
+        try:
+            import tvm_ffi
+            print('tvm_ffi imported')
+        except Exception as e:
+            print(f'tvm_ffi error: {e}')
+            
+        try:
+            import tvm
+            print('tvm imported')
+        except Exception as e:
+            print(f'tvm error: {e}')
+        "
+        
+        mkdir -p ../config
+        mkdir -p ../output
+        
+        # Generate config
         python -m mlc_llm gen_config ../model \
           --quantization q4f16_1 \
           --prefill-chunk-size 128 \
@@ -98,15 +129,10 @@ jobs:
           --conv-template qwen2 \
           --output ../config
         
+        echo "=== Generated config ==="
         cat ../config/mlc-chat-config.json
         
-    - name: Compile for iOS
-      run: |
-        source python_paths.sh
-        cd mlc-llm
-        
-        mkdir -p ../output
-        
+        # Compile for iOS
         python -m mlc_llm compile ../config/mlc-chat-config.json \
           --device iphone \
           --output ../output/model-iphone.tar
@@ -115,7 +141,9 @@ jobs:
       run: |
         cd output
         tar -xvf model-iphone.tar
-        ls -lh *.o
+        echo "=== Extracted files ==="
+        ls -lh
+        ls -lh *.o 2>/dev/null || echo "No .o files"
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
