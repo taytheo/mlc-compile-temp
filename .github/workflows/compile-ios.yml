@@ -6,7 +6,7 @@ on:
 jobs:
   compile-ios:
     runs-on: macos-14
-    timeout-minutes: 90
+    timeout-minutes: 120
     
     steps:
     - name: Setup Python
@@ -17,18 +17,30 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       
+    - name: Install dependencies
+      run: |
+        pip install numpy decorator attrs typing_extensions psutil scipy tornado
+        brew install ninja
+        
     - name: Clone MLC-LLM
       run: |
         git clone --recursive https://github.com/mlc-ai/mlc-llm.git
+        cd mlc-llm
+        echo "MLC-LLM cloned successfully"
+        ls -la
         
     - name: Build MLC-LLM
       run: |
         cd mlc-llm
         mkdir -p build && cd build
         
-        # Create config.cmake manually instead of using interactive script
-        cat > config.cmake << 'EOF'
-        set(TVM_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/tvm")
+        # Get absolute path for TVM
+        TVM_PATH="$(cd ../3rdparty/tvm && pwd)"
+        echo "TVM_PATH: $TVM_PATH"
+        
+        # Create config.cmake with absolute path
+        cat > config.cmake << EOF
+        set(TVM_SOURCE_DIR "$TVM_PATH")
         set(USE_CUDA OFF)
         set(USE_METAL ON)
         set(USE_VULKAN OFF)
@@ -37,20 +49,46 @@ jobs:
         set(CMAKE_BUILD_TYPE Release)
         EOF
         
+        echo "=== config.cmake ==="
         cat config.cmake
         
-        cmake .. -DCMAKE_BUILD_TYPE=Release
-        make -j$(sysctl -n hw.ncpu)
+        # Build with CMake policy fix
+        cmake .. \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+          -GNinja
+        
+        ninja -j$(sysctl -n hw.ncpu)
+        
+        echo "=== Build output ==="
+        ls -la
+        
+    - name: Verify MLC-LLM installation
+      run: |
+        cd mlc-llm
+        export PYTHONPATH=$(pwd)/python:$PYTHONPATH
+        export TVM_HOME=$(pwd)/3rdparty/tvm
+        
+        python -c "import mlc_llm; print('MLC-LLM version:', mlc_llm.__file__)"
+        python -m mlc_llm --help | head -20
         
     - name: Download Model
       run: |
         pip install huggingface_hub
         huggingface-cli download mlc-ai/Qwen3-4B-q4f16_1-MLC --local-dir ./model
         
-    - name: Compile for iOS
+        echo "=== Model files ==="
+        ls -la ./model/
+        
+        echo "=== Original config ==="
+        cat ./model/mlc-chat-config.json
+        
+    - name: Generate config with small buffers
       run: |
         cd mlc-llm
         export PYTHONPATH=$(pwd)/python:$PYTHONPATH
+        
+        mkdir -p ../config
         
         python -m mlc_llm gen_config ../model \
           --quantization q4f16_1 \
@@ -60,15 +98,51 @@ jobs:
           --conv-template qwen2 \
           --output ../config
         
+        echo "=== Generated config ==="
+        cat ../config/mlc-chat-config.json
+        
+    - name: Compile for iOS
+      run: |
+        cd mlc-llm
+        export PYTHONPATH=$(pwd)/python:$PYTHONPATH
+        
+        mkdir -p ../output
+        
         python -m mlc_llm compile ../config/mlc-chat-config.json \
           --device iphone \
-          --output ../output.tar
+          --output ../output/model-iphone.tar
         
-        cd .. && tar -xvf output.tar
-        ls -la *.o
+        echo "=== Compiled output ==="
+        ls -la ../output/
         
-    - name: Upload
+    - name: Extract compiled files
+      run: |
+        cd output
+        tar -xvf model-iphone.tar
+        
+        echo "=== Extracted files ==="
+        ls -la
+        
+        echo "=== File sizes ==="
+        ls -lh *.o 2>/dev/null || echo "No .o files found"
+        
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ios-libs
-        path: "*.o"
+        name: ios-compiled-libs
+        path: |
+          output/*.o
+          config/mlc-chat-config.json
+        retention-days: 30
+        
+    - name: Summary
+      run: |
+        echo "## ✅ iOS Compilation Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Settings used:" >> $GITHUB_STEP_SUMMARY
+        echo "- prefill_chunk_size: 128" >> $GITHUB_STEP_SUMMARY
+        echo "- context_window_size: 4096" >> $GITHUB_STEP_SUMMARY
+        echo "- max_batch_size: 1" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Files:" >> $GITHUB_STEP_SUMMARY
+        ls -lh output/*.o 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Check artifacts" >> $GITHUB_STEP_SUMMARY
