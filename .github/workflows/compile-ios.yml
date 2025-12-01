@@ -17,12 +17,18 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       
-    - name: Clone and Build MLC-LLM
+    - name: Clone MLC-LLM
       run: |
         git clone --recursive https://github.com/mlc-ai/mlc-llm.git
+        
+    - name: Build MLC-LLM
+      run: |
         cd mlc-llm
         mkdir -p build && cd build
-        python ../cmake/gen_cmake_config.py
+        
+        # Skip interactive prompt by providing empty input
+        echo "" | python ../cmake/gen_cmake_config.py
+        
         cmake .. -DCMAKE_BUILD_TYPE=Release
         make -j$(sysctl -n hw.ncpu)
         
