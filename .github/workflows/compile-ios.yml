@@ -26,8 +26,18 @@ jobs:
         cd mlc-llm
         mkdir -p build && cd build
         
-        # Skip interactive prompt by providing empty input
-        echo "" | python ../cmake/gen_cmake_config.py
+        # Create config.cmake manually instead of using interactive script
+        cat > config.cmake << 'EOF'
+        set(TVM_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty/tvm")
+        set(USE_CUDA OFF)
+        set(USE_METAL ON)
+        set(USE_VULKAN OFF)
+        set(USE_OPENCL OFF)
+        set(USE_FLASHINFER OFF)
+        set(CMAKE_BUILD_TYPE Release)
+        EOF
+        
+        cat config.cmake
         
         cmake .. -DCMAKE_BUILD_TYPE=Release
         make -j$(sysctl -n hw.ncpu)
