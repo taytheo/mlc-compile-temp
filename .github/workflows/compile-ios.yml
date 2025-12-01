@@ -26,6 +26,30 @@ jobs:
       run: |
         git clone --recursive https://github.com/mlc-ai/mlc-llm.git
         
+    - name: Build TVM first
+      run: |
+        cd mlc-llm/3rdparty/tvm
+        mkdir -p build && cd build
+        
+        cat > config.cmake << EOF
+        set(USE_METAL ON)
+        set(USE_CUDA OFF)
+        set(USE_VULKAN OFF)
+        set(USE_OPENCL OFF)
+        set(CMAKE_BUILD_TYPE Release)
+        EOF
+        
+        cmake .. \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+          -GNinja
+        
+        ninja -j$(sysctl -n hw.ncpu)
+        
+        echo "=== TVM built libraries ==="
+        ls -la *.dylib 2>/dev/null || echo "checking..."
+        find . -name "libtvm*.dylib" | head -10
+        
     - name: Build MLC-LLM
       run: |
         cd mlc-llm
@@ -50,25 +74,26 @@ jobs:
         
         ninja -j$(sysctl -n hw.ncpu)
         
-    - name: Find and setup library paths
-      id: libpaths
+        echo "=== MLC-LLM built libraries ==="
+        ls -la *.dylib 2>/dev/null
+        
+    - name: Setup library paths
       run: |
-        cd mlc-llm/build
+        cd mlc-llm
         
         echo "=== All dylib files ==="
-        find . -name "*.dylib" 2>/dev/null
+        find . -name "libtvm*.dylib" 2>/dev/null
         
-        echo "=== Looking for libtvm ==="
-        find . -name "libtvm*.dylib" 2>/dev/null || echo "not found in build"
-        find .. -name "libtvm*.dylib" 2>/dev/null | head -10
+        # Copy TVM libraries to build directory if needed
+        TVM_BUILD=$(pwd)/3rdparty/tvm/build
+        MLC_BUILD=$(pwd)/build
         
-        # Get the build directory absolute path
-        BUILD_PATH=$(pwd)
-        echo "BUILD_PATH=$BUILD_PATH" >> $GITHUB_OUTPUT
+        if [ -f "$TVM_BUILD/libtvm_ffi.dylib" ]; then
+          cp $TVM_BUILD/libtvm*.dylib $MLC_BUILD/
+          echo "Copied TVM libs to MLC build"
+        fi
         
-        # List all files in build directory
-        echo "=== Build directory contents ==="
-        ls -la
+        ls -la $MLC_BUILD/*.dylib
         
     - name: Download Original Qwen3-4B Model
       run: |
@@ -83,20 +108,15 @@ jobs:
     - name: Convert and Compile for iOS
       env:
         TVM_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build
-        TVM_FFI_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build
-        DYLD_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build
       run: |
         cd mlc-llm
         
         export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$PYTHONPATH
+        export TVM_LIBRARY_PATH=$(pwd)/build
         
-        echo "=== Environment check ==="
-        echo "TVM_LIBRARY_PATH: $TVM_LIBRARY_PATH"
-        echo "PYTHONPATH: $PYTHONPATH"
-        
-        echo "=== Checking library files ==="
-        ls -la $TVM_LIBRARY_PATH/*.dylib 2>/dev/null || echo "No dylib directly in build"
-        find $TVM_LIBRARY_PATH -name "*.dylib" | head -10
+        # Test import
+        python -c "import tvm; print('TVM OK')"
+        python -c "import mlc_llm; print('MLC-LLM OK')"
         
         mkdir -p ../output
         
@@ -109,7 +129,6 @@ jobs:
           --conv-template qwen2 \
           --output ../output/config
         
-        echo "=== Generated config ==="
         cat ../output/config/mlc-chat-config.json
         
         # Step 2: Convert weights
@@ -126,11 +145,7 @@ jobs:
       run: |
         cd output
         tar -xvf model-iphone.tar
-        
-        echo "=== Compiled iOS libraries ==="
         ls -lh *.o 2>/dev/null || echo "No .o files"
-        
-        echo "=== Config check ==="
         grep -E "prefill|context_window" config/mlc-chat-config.json
         
     - name: Upload artifacts
