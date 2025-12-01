@@ -6,6 +6,7 @@ on:
 jobs:
   compile-ios:
     runs-on: macos-14
+    timeout-minutes: 90
     
     steps:
     - name: Setup Python
@@ -13,23 +14,45 @@ jobs:
       with:
         python-version: '3.11'
         
-    - name: Install MLC-LLM
+    - name: Install Rust
+      uses: dtolnay/rust-action@stable
+      
+    - name: Clone and Build MLC-LLM
       run: |
-        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly mlc-ai-nightly
-        pip install huggingface_hub
+        git clone --recursive https://github.com/mlc-ai/mlc-llm.git
+        cd mlc-llm
+        mkdir -p build && cd build
+        python ../cmake/gen_cmake_config.py
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(sysctl -n hw.ncpu)
         
-    - name: Download and Compile
+    - name: Download Model
       run: |
+        pip install huggingface_hub
         huggingface-cli download mlc-ai/Qwen3-4B-q4f16_1-MLC --local-dir ./model
-        mkdir -p ./output
-        mlc_llm compile ./model/mlc-chat-config.json \
+        
+    - name: Compile for iOS
+      run: |
+        cd mlc-llm
+        export PYTHONPATH=$(pwd)/python:$PYTHONPATH
+        
+        python -m mlc_llm gen_config ../model \
+          --quantization q4f16_1 \
+          --prefill-chunk-size 128 \
+          --context-window-size 4096 \
+          --max-batch-size 1 \
+          --conv-template qwen2 \
+          --output ../config
+        
+        python -m mlc_llm compile ../config/mlc-chat-config.json \
           --device iphone \
-          --overrides "prefill_chunk_size=128;context_window_size=4096;max_batch_size=1" \
-          --output ./output/model-iphone.tar
-        cd ./output && tar -xvf model-iphone.tar && ls -lh
+          --output ../output.tar
+        
+        cd .. && tar -xvf output.tar
+        ls -la *.o
         
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
         name: ios-libs
-        path: ./output/*.o
+        path: "*.o"
