@@ -50,11 +50,29 @@ jobs:
         
         ninja -j$(sysctl -n hw.ncpu)
         
-    - name: Verify MLC-LLM installation
+    - name: Setup Python paths
       run: |
         cd mlc-llm
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
+        # Find all Python paths needed
+        echo "Setting up Python paths..."
+        
+        MLC_PYTHON=$(pwd)/python
+        TVM_PYTHON=$(pwd)/3rdparty/tvm/python
+        TVM_FFI_PYTHON=$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python
+        
+        # Create a file with paths for other steps
+        echo "export PYTHONPATH=$MLC_PYTHON:$TVM_PYTHON:$TVM_FFI_PYTHON:\$PYTHONPATH" > ../python_paths.sh
+        echo "export TVM_LIBRARY_PATH=$(pwd)/build" >> ../python_paths.sh
+        
+        cat ../python_paths.sh
+        
+    - name: Verify MLC-LLM installation
+      run: |
+        source python_paths.sh
+        cd mlc-llm
+        
+        python -c "import tvm_ffi; print('tvm_ffi OK')"
         python -c "import tvm; print('TVM OK')"
         python -c "import mlc_llm; print('MLC-LLM OK')"
         python -m mlc_llm --help | head -10
@@ -67,8 +85,8 @@ jobs:
         
     - name: Generate config with small buffers
       run: |
+        source python_paths.sh
         cd mlc-llm
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
         mkdir -p ../config
         
@@ -84,8 +102,8 @@ jobs:
         
     - name: Compile for iOS
       run: |
+        source python_paths.sh
         cd mlc-llm
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
         mkdir -p ../output
         
