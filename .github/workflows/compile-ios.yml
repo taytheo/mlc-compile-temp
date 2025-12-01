@@ -25,20 +25,14 @@ jobs:
     - name: Clone MLC-LLM
       run: |
         git clone --recursive https://github.com/mlc-ai/mlc-llm.git
-        cd mlc-llm
-        echo "MLC-LLM cloned successfully"
-        ls -la
         
     - name: Build MLC-LLM
       run: |
         cd mlc-llm
         mkdir -p build && cd build
         
-        # Get absolute path for TVM
         TVM_PATH="$(cd ../3rdparty/tvm && pwd)"
-        echo "TVM_PATH: $TVM_PATH"
         
-        # Create config.cmake with absolute path
         cat > config.cmake << EOF
         set(TVM_SOURCE_DIR "$TVM_PATH")
         set(USE_CUDA OFF)
@@ -49,10 +43,6 @@ jobs:
         set(CMAKE_BUILD_TYPE Release)
         EOF
         
-        echo "=== config.cmake ==="
-        cat config.cmake
-        
-        # Build with CMake policy fix
         cmake .. \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
@@ -60,33 +50,25 @@ jobs:
         
         ninja -j$(sysctl -n hw.ncpu)
         
-        echo "=== Build output ==="
-        ls -la
-        
     - name: Verify MLC-LLM installation
       run: |
         cd mlc-llm
-        export PYTHONPATH=$(pwd)/python:$PYTHONPATH
-        export TVM_HOME=$(pwd)/3rdparty/tvm
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
-        python -c "import mlc_llm; print('MLC-LLM version:', mlc_llm.__file__)"
-        python -m mlc_llm --help | head -20
+        python -c "import tvm; print('TVM OK')"
+        python -c "import mlc_llm; print('MLC-LLM OK')"
+        python -m mlc_llm --help | head -10
         
     - name: Download Model
       run: |
         pip install huggingface_hub
         huggingface-cli download mlc-ai/Qwen3-4B-q4f16_1-MLC --local-dir ./model
-        
-        echo "=== Model files ==="
-        ls -la ./model/
-        
-        echo "=== Original config ==="
         cat ./model/mlc-chat-config.json
         
     - name: Generate config with small buffers
       run: |
         cd mlc-llm
-        export PYTHONPATH=$(pwd)/python:$PYTHONPATH
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
         mkdir -p ../config
         
@@ -98,13 +80,12 @@ jobs:
           --conv-template qwen2 \
           --output ../config
         
-        echo "=== Generated config ==="
         cat ../config/mlc-chat-config.json
         
     - name: Compile for iOS
       run: |
         cd mlc-llm
-        export PYTHONPATH=$(pwd)/python:$PYTHONPATH
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
         mkdir -p ../output
         
@@ -112,19 +93,11 @@ jobs:
           --device iphone \
           --output ../output/model-iphone.tar
         
-        echo "=== Compiled output ==="
-        ls -la ../output/
-        
     - name: Extract compiled files
       run: |
         cd output
         tar -xvf model-iphone.tar
-        
-        echo "=== Extracted files ==="
-        ls -la
-        
-        echo "=== File sizes ==="
-        ls -lh *.o 2>/dev/null || echo "No .o files found"
+        ls -lh *.o
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -134,15 +107,3 @@ jobs:
           output/*.o
           config/mlc-chat-config.json
         retention-days: 30
-        
-    - name: Summary
-      run: |
-        echo "## ✅ iOS Compilation Complete" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Settings used:" >> $GITHUB_STEP_SUMMARY
-        echo "- prefill_chunk_size: 128" >> $GITHUB_STEP_SUMMARY
-        echo "- context_window_size: 4096" >> $GITHUB_STEP_SUMMARY
-        echo "- max_batch_size: 1" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Files:" >> $GITHUB_STEP_SUMMARY
-        ls -lh output/*.o 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Check artifacts" >> $GITHUB_STEP_SUMMARY
