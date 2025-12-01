@@ -19,7 +19,7 @@ jobs:
       
     - name: Install dependencies
       run: |
-        pip install numpy decorator attrs typing_extensions psutil scipy tornado huggingface_hub
+        pip install numpy decorator attrs typing_extensions psutil scipy tornado "huggingface_hub[cli]"
         brew install ninja
         
     - name: Clone MLC-LLM
@@ -52,10 +52,12 @@ jobs:
         
     - name: Download Original Qwen3-4B Model
       run: |
-        # Download the BASE model (not pre-converted MLC)
-        python -m huggingface_hub.cli download Qwen/Qwen3-4B --local-dir ./qwen3-4b-base
+        python -c "
+        from huggingface_hub import snapshot_download
+        snapshot_download(repo_id='Qwen/Qwen3-4B', local_dir='./qwen3-4b-base')
+        print('Download complete')
+        "
         
-        echo "=== Downloaded model files ==="
         ls -la ./qwen3-4b-base/
         
     - name: Convert and Compile for iOS
@@ -84,9 +86,6 @@ jobs:
           --quantization q4f16_1 \
           --output ../output/weights
         
-        echo "=== Converted weights ==="
-        ls -la ../output/weights/
-        
         # Step 3: Compile for iOS with small buffers
         python -m mlc_llm compile ../output/config/mlc-chat-config.json \
           --device iphone \
@@ -101,7 +100,7 @@ jobs:
         ls -lh *.o 2>/dev/null || echo "No .o files"
         
         echo "=== Config check ==="
-        cat config/mlc-chat-config.json | grep -E "prefill|context_window"
+        grep -E "prefill|context_window" config/mlc-chat-config.json
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -110,5 +109,4 @@ jobs:
         path: |
           output/*.o
           output/config/mlc-chat-config.json
-          output/weights/
         retention-days: 30
