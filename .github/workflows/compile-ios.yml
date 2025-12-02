@@ -32,6 +32,9 @@ jobs:
 
     - name: Patch batch_spec_verify.py
       run: python3 .github/scripts/patch_batch_spec.py
+    
+    - name: Patch attach_sampler.py  # ← 이 스텝 추가!
+      run: python3 .github/scripts/patch_attach_sampler.py
 
     - name: Download model and create custom config
       run: |
