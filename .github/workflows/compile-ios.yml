@@ -32,19 +32,17 @@ jobs:
 
     - name: Apply patch for batch_spec_verify bug
       run: |
-        python3 -c "
-        import site, os, re
-        sp = site.getsitepackages()[0]
-        bf = os.path.join(sp, 'mlc_llm', 'op', 'batch_spec_verify.py')
-        if not os.path.exists(bf):
-            print('File not found'); exit(0)
-        with open(bf, 'r') as f: c = f.read()
-        c = re.sub(r'T\.alloc_buffer\s*\(\s*\(\s*1\s*,\s*\)\s*,\s*[\"'\'']bool[\"'\'']\s*\)', 'T.alloc_buffer((1,), \"int32\")', c)
-        c = re.sub(r'done\[0\]\s*=\s*False', 'done[0] = 0', c)
-        c = re.sub(r'done\[0\]\s*=\s*True', 'done[0] = 1', c)
-        with open(bf, 'w') as f: f.write(c)
-        print('Patch applied')
-        "
+        SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])")
+        FILE="$SITE_PKG/mlc_llm/op/batch_spec_verify.py"
+        if [ -f "$FILE" ]; then
+          echo "Before patch:"
+          grep -n "alloc_buffer\|done\[" "$FILE" | head -10
+          sed -i.bak 's/"bool"/"int32"/g' "$FILE"
+          sed -i.bak 's/done\[0\] = False/done[0] = 0/g' "$FILE"
+          sed -i.bak 's/done\[0\] = True/done[0] = 1/g' "$FILE"
+          echo "After patch:"
+          grep -n "alloc_buffer\|done\[" "$FILE" | head -10
+        fi
 
     - name: Compile for iOS
       run: |
