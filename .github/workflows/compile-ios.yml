@@ -34,27 +34,15 @@ jobs:
       run: |
         SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])")
         FILE="$SITE_PKG/mlc_llm/op/batch_spec_verify.py"
-        
-        echo "=== Site packages: $SITE_PKG ==="
-        
+        echo "=== Patching $FILE ==="
         if [ -f "$FILE" ]; then
-          echo "=== Before patch (lines 100-130): ==="
-          sed -n '100,130p' "$FILE"
-          
-          # macOS uses different sed syntax (no .bak extension needed with '')
-          # 1. Change "bool" to "int32"
-          sed -i '' 's/"bool"/"int32"/g' "$FILE"
-          # 2. Change done[0] = False to done[0] = 0
-          sed -i '' 's/done\[0\] = False/done[0] = 0/g' "$FILE"
-          # 3. Change done[0] = True to done[0] = 1
-          sed -i '' 's/done\[0\] = True/done[0] = 1/g' "$FILE"
-          # 4. KEY FIX: Change while T.Not(done[0]): to while done[0] == 0:
-          sed -i '' 's/while T\.Not(done\[0\]):/while done[0] == 0:/g' "$FILE"
-          
-          echo "=== After patch (lines 100-130): ==="
-          sed -n '100,130p' "$FILE"
-        else
-          echo "ERROR: File not found!"
+          sed -n '50,130p' "$FILE"
+          sed -i '' 's/done\[0\] = False/done[0] = T.bool(False)/g' "$FILE"
+          sed -i '' 's/done\[0\] = True/done[0] = T.bool(True)/g' "$FILE"
+          sed -i '' 's/pred_local\[0\] = False/pred_local[0] = T.bool(False)/g' "$FILE"
+          sed -i '' 's/pred_local\[0\] = True/pred_local[0] = T.bool(True)/g' "$FILE"
+          echo "=== After patch ==="
+          sed -n '50,130p' "$FILE"
         fi
 
     - name: Compile for iOS
