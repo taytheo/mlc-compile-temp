@@ -43,30 +43,43 @@ jobs:
     - name: Patch batch_spec_verify.py bug (bool type issue)
       run: |
         SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])")
-        FILE="$SITE_PKG/mlc_llm/op/batch_spec_verify.py"
-        echo "=== Patching $FILE ==="
+        echo "=== Site packages: $SITE_PKG ==="
         
-        # Also patch the source copy
-        SRC_FILE="mlc-llm/python/mlc_llm/op/batch_spec_verify.py"
+        # Find all Python files with bool type issues and patch them
+        echo "=== Searching for files with bool type issues ==="
+        grep -r "= False\|= True\|_var(\"bool\")\|\"bool\", scope=" "$SITE_PKG/mlc_llm/op/" || true
         
-        for F in "$FILE" "$SRC_FILE"; do
+        # Patch all files in mlc_llm/op/ directory
+        for F in "$SITE_PKG/mlc_llm/op/"*.py; do
           if [ -f "$F" ]; then
-            echo "Patching: $F"
-            # Change bool type to int32 for done and pred variables
-            sed -i '' 's/done = _var("bool")/done = _var("int32")/g' "$F"
-            sed -i '' 's/pred_shared = T.alloc_buffer((1,), "bool", scope="shared")/pred_shared = T.alloc_buffer((1,), "int32", scope="shared")/g' "$F"
-            sed -i '' 's/pred_local = T.alloc_buffer((1,), "bool", scope="local")/pred_local = T.alloc_buffer((1,), "int32", scope="local")/g' "$F"
-            # Change boolean assignments to int
-            sed -i '' 's/done\[0\] = False/done[0] = 0/g' "$F"
-            sed -i '' 's/done\[0\] = True/done[0] = 1/g' "$F"
-            # Change T.Not(done[0]) to done[0] == 0
-            sed -i '' 's/while T.Not(done\[0\]):/while done[0] == 0:/g' "$F"
-            # Change pred comparisons
-            sed -i '' 's/if pred_local\[0\]:/if pred_local[0] != 0:/g' "$F"
-            echo "=== Patched content (lines 85-125) ==="
-            sed -n '85,125p' "$F"
+            echo "Checking: $F"
+            if grep -q "_var(\"bool\")\|\"bool\", scope=\|= False\|= True" "$F"; then
+              echo "Patching bool issues in: $F"
+              
+              # Change bool type declarations to int32
+              sed -i '' 's/_var("bool")/_var("int32")/g' "$F"
+              sed -i '' 's/"bool", scope="shared"/"int32", scope="shared"/g' "$F"
+              sed -i '' 's/"bool", scope="local"/"int32", scope="local"/g' "$F"
+              sed -i '' "s/(1,), \"bool\"/(1,), \"int32\"/g" "$F"
+              
+              # Change boolean assignments to int (be careful with context)
+              # Only change assignments like var[0] = False/True
+              sed -i '' 's/\[0\] = False/[0] = 0/g' "$F"
+              sed -i '' 's/\[0\] = True/[0] = 1/g' "$F"
+              
+              # Change T.Not(var[0]) to var[0] == 0
+              sed -i '' 's/T\.Not(\([^)]*\)\[0\])/\1[0] == 0/g' "$F"
+              
+              # Change if var[0]: to if var[0] != 0:
+              sed -i '' 's/if \([a-z_]*\)\[0\]:$/if \1[0] != 0:/g' "$F"
+              
+              echo "Done patching: $F"
+            fi
           fi
         done
+        
+        echo "=== Verifying patches ==="
+        grep -r "_var(\"bool\")\|\"bool\", scope=" "$SITE_PKG/mlc_llm/op/" && echo "WARNING: Some bool types remain" || echo "All bool types patched"
 
     - name: Create mlc-package-config.json for Qwen3
       run: |
