@@ -30,7 +30,7 @@ jobs:
         
         # Verify installation
         python -c "import mlc_llm; print('MLC-LLM:', mlc_llm)"
-        mlc_llm --help | head -5
+        python -m mlc_llm --help | head -5
         
     - name: Download Qwen3-4B Model
       run: |
@@ -45,7 +45,7 @@ jobs:
       run: |
         mkdir -p ./output/config
         
-        mlc_llm gen_config ./qwen3-4b-base \
+        python -m mlc_llm gen_config ./qwen3-4b-base \
           --quantization q4f16_1 \
           --prefill-chunk-size 128 \
           --context-window-size 4096 \
@@ -58,7 +58,7 @@ jobs:
         
     - name: Convert Weights
       run: |
-        mlc_llm convert_weight ./qwen3-4b-base \
+        python -m mlc_llm convert_weight ./qwen3-4b-base \
           --quantization q4f16_1 \
           --output ./output/weights
         
@@ -67,7 +67,7 @@ jobs:
         
     - name: Compile for iOS
       run: |
-        mlc_llm compile ./output/config/mlc-chat-config.json \
+        python -m mlc_llm compile ./output/config/mlc-chat-config.json \
           --device iphone \
           --output ./output/model-iphone.tar
         
