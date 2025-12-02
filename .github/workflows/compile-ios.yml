@@ -28,8 +28,6 @@ jobs:
         git clone --recursive https://github.com/mlc-ai/mlc-llm.git
         cd mlc-llm
         
-        pip install numpy decorator attrs typing_extensions psutil scipy tornado
-        
         mkdir -p build && cd build
         
         cat > config.cmake << 'EOF'
@@ -46,34 +44,31 @@ jobs:
         make -j$(sysctl -n hw.ncpu)
         
         echo "=== Built libraries ==="
-        ls -la lib/*.dylib 2>/dev/null || ls -la *.dylib
+        find . -name "*.dylib" | head -20
+        ls -la lib/*.dylib 2>/dev/null || ls -la *.dylib 2>/dev/null || echo "checking elsewhere"
         
-    - name: Setup Python environment
+    - name: Test MLC-LLM Import
       shell: bash -el {0}
+      env:
+        TVM_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build/lib
       run: |
         cd mlc-llm
         
-        # Set library path
+        # Add all Python paths
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$PYTHONPATH
         export TVM_LIBRARY_PATH=$(pwd)/build/lib
         export DYLD_LIBRARY_PATH=$(pwd)/build/lib:$DYLD_LIBRARY_PATH
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
-        # Install minimal dependencies (skip flashinfer)
-        pip install safetensors transformers sentencepiece tiktoken tqdm
+        echo "=== Environment ==="
+        echo "TVM_LIBRARY_PATH: $TVM_LIBRARY_PATH"
+        echo "PYTHONPATH: $PYTHONPATH"
+        ls -la $TVM_LIBRARY_PATH/*.dylib 2>/dev/null || echo "No dylib in lib"
         
-        # Test import
-        python -c "
-        import sys
-        sys.path.insert(0, '$(pwd)/python')
-        sys.path.insert(0, '$(pwd)/3rdparty/tvm/python')
-        import os
-        os.environ['TVM_LIBRARY_PATH'] = '$(pwd)/build/lib'
-        
-        from tvm import register_global_func
-        print('TVM OK')
-        import mlc_llm
-        print('MLC-LLM OK')
-        "
+        # Test imports step by step
+        python -c "import sys; print('Python:', sys.executable)"
+        python -c "import tvm_ffi; print('tvm_ffi OK')"
+        python -c "import tvm; print('tvm OK')"
+        python -c "import mlc_llm; print('mlc_llm OK')"
         
     - name: Download Qwen3-4B Model
       shell: bash -el {0}
@@ -86,12 +81,14 @@ jobs:
         
     - name: Generate Config and Compile
       shell: bash -el {0}
+      env:
+        TVM_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build/lib
       run: |
         cd mlc-llm
         
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$PYTHONPATH
         export TVM_LIBRARY_PATH=$(pwd)/build/lib
         export DYLD_LIBRARY_PATH=$(pwd)/build/lib:$DYLD_LIBRARY_PATH
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
         mkdir -p ../output
         
