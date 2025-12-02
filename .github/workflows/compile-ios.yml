@@ -32,23 +32,23 @@ jobs:
         echo "=== BEFORE PATCH ==="
         grep -n 'alloc_buffer.*bool\|done\[0\]\|while.*T\.Not' "$BSV" | head -20 || echo "Pattern not found"
         
-        # Create a temporary Python script
-        cat > /tmp/patch_script.py << 'PYEOF'
-import site
+        # 간단한 파이썬 코드로 패치 적용
+        python3 -c "
 import re
-file_path = f"{site.getsitepackages()[0]}/mlc_llm/op/batch_spec_verify.py"
-with open(file_path, "r") as f:
+import site
+pkg_path = site.getsitepackages()[0]
+file_path = pkg_path + '/mlc_llm/op/batch_spec_verify.py'
+with open(file_path, 'r') as f:
     content = f.read()
-content = re.sub(r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*"bool"\s*\)', 'T.alloc_buffer((1,), "int32")', content)
+# 패치 적용
+content = re.sub(r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*\"bool\"\s*\)', 'T.alloc_buffer((1,), \"int32\")', content)
 content = content.replace('done[0] = False', 'done[0] = 0')
 content = content.replace('done[0] = True', 'done[0] = 1')
 content = re.sub(r'while\s+T\.Not\(done\[0\]\)\s*:', 'while done[0] == 0:', content)
-with open(file_path, "w") as f:
+with open(file_path, 'w') as f:
     f.write(content)
-print("Patch applied to batch_spec_verify.py")
-PYEOF
-        
-        python3 /tmp/patch_script.py
+print('Patch applied to batch_spec_verify.py')
+"
         echo "=== AFTER PATCH ==="
         grep -n 'alloc_buffer.*int32\|done\[0\] ==\|done\[0\] = 0\|done\[0\] = 1' "$BSV" | head -20 || echo "Verify failed"
 
@@ -58,26 +58,24 @@ PYEOF
         python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
         cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
         
-        # Create a temporary Python script
-        cat > /tmp/config_script.py << 'PYEOF'
+        # 간단한 파이썬 코드로 설정 수정
+        python3 -c "
 import json
-with open("./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json", "r") as f:
+with open('./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json', 'r') as f:
     config = json.load(f)
-config["prefill_chunk_size"] = 128
-config["context_window_size"] = 4096
-config["model_config"]["prefill_chunk_size"] = 128
-config["model_config"]["context_window_size"] = 4096
-config["model_config"]["max_batch_size"] = 1
-config["model_config"]["dtype"] = "float16"
-with open("./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json", "w") as f:
+config['prefill_chunk_size'] = 128
+config['context_window_size'] = 4096
+config['model_config']['prefill_chunk_size'] = 128
+config['model_config']['context_window_size'] = 4096
+config['model_config']['max_batch_size'] = 1
+config['model_config']['dtype'] = 'float16'
+with open('./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json', 'w') as f:
     json.dump(config, f, indent=2)
-print("Config updated")
-print(f"  prefill_chunk_size: {config['prefill_chunk_size']}")
-print(f"  context_window_size: {config['context_window_size']}")
-print(f"  max_batch_size: {config['model_config']['max_batch_size']}")
-PYEOF
-        
-        python3 /tmp/config_script.py
+print('Config updated')
+print('  prefill_chunk_size: ' + str(config['prefill_chunk_size']))
+print('  context_window_size: ' + str(config['context_window_size']))
+print('  max_batch_size: ' + str(config['model_config']['max_batch_size']))
+"
 
     - name: Compile for iOS
       run: |
