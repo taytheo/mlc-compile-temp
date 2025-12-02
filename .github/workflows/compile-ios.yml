@@ -32,11 +32,11 @@ jobs:
         echo "=== BEFORE PATCH ==="
         grep -n 'alloc_buffer.*bool\|done\[0\]\|while.*T\.Not' "$BSV" | head -20 || echo "Pattern not found"
         
-        # 직접 sed 명령어로 패치 적용 (가장 안전한 방법)
-        sed -i '' 's/T.alloc_buffer((1,), "bool")/T.alloc_buffer((1,), "int32")/g' "$BSV"
+        # sed 명령어로 패치 적용
+        sed -i '' 's/T\.alloc_buffer((1,), "bool")/T.alloc_buffer((1,), "int32")/g' "$BSV"
         sed -i '' 's/done\[0\] = False/done[0] = 0/g' "$BSV"
         sed -i '' 's/done\[0\] = True/done[0] = 1/g' "$BSV"
-        sed -i '' 's/while T.Not(done\[0\]):/while done[0] == 0:/g' "$BSV"
+        sed -i '' 's/while T\.Not(done\[0\]):/while done[0] == 0:/g' "$BSV"
         
         echo "Patch applied to batch_spec_verify.py"
         
@@ -49,25 +49,25 @@ jobs:
         python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
         cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
         
-        # Python을 최소한으로 사용하는 방법
-        python3 << 'PYEOF'
-import json
-import sys
-with open('./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json', 'r') as f:
+        # Python 스크립트 파일 생성
+        echo 'import json
+with open("./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json", "r") as f:
     config = json.load(f)
-config['prefill_chunk_size'] = 128
-config['context_window_size'] = 4096
-config['model_config']['prefill_chunk_size'] = 128
-config['model_config']['context_window_size'] = 4096
-config['model_config']['max_batch_size'] = 1
-config['model_config']['dtype'] = 'float16'
-with open('./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json', 'w') as f:
+config["prefill_chunk_size"] = 128
+config["context_window_size"] = 4096
+config["model_config"]["prefill_chunk_size"] = 128
+config["model_config"]["context_window_size"] = 4096
+config["model_config"]["max_batch_size"] = 1
+config["model_config"]["dtype"] = "float16"
+with open("./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json", "w") as f:
     json.dump(config, f, indent=2)
-print('Config updated')
-print('  prefill_chunk_size:', config['prefill_chunk_size'])
-print('  context_window_size:', config['context_window_size'])
-print('  max_batch_size:', config['model_config']['max_batch_size'])
-PYEOF
+print("Config updated")
+print("  prefill_chunk_size: " + str(config["prefill_chunk_size"]))
+print("  context_window_size: " + str(config["context_window_size"]))
+print("  max_batch_size: " + str(config["model_config"]["max_batch_size"]))' > config_script.py
+        
+        python3 config_script.py
+        rm config_script.py
 
     - name: Compile for iOS
       run: |
