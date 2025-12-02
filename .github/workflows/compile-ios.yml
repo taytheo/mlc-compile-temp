@@ -20,16 +20,24 @@ jobs:
         python-version: '3.11'
         activate-environment: mlc
         
-    - name: Install MLC-LLM from prebuilt wheel
+    - name: Install specific MLC-LLM version
       run: |
-        # Install prebuilt mlc-llm package for macOS
-        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+        # Try installing a specific older version that's known to work
+        # First, list available versions
+        pip index versions mlc-llm-nightly-cpu 2>/dev/null || true
+        
+        # Install specific version - try 0.18 series which was more stable
+        pip install mlc-ai-nightly-cpu==0.18.dev224 mlc-llm-nightly-cpu==0.18.dev95 \
+          -f https://mlc.ai/wheels 2>/dev/null || {
+          echo "Specific version not found, trying latest with workaround..."
+          pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+        }
         
         # Install additional dependencies
         pip install "huggingface_hub>=0.20.0"
         
-        # Verify installation
-        python -c "import mlc_llm; print('MLC-LLM:', mlc_llm)"
+        # Check installed version
+        pip show mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         
     - name: Download Qwen3-4B-Base Model
       run: |
@@ -64,24 +72,33 @@ jobs:
         echo "=== Converted weights ==="
         ls -lh ./output/weights/
         
-    - name: Compile for iOS (with debug)
+    - name: Patch batch_spec_verify bug
+      run: |
+        # Find and patch the buggy file
+        SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
+        BUGGY_FILE="$SITE_PACKAGES/mlc_llm/op/batch_spec_verify.py"
+        
+        if [ -f "$BUGGY_FILE" ]; then
+          echo "Found buggy file: $BUGGY_FILE"
+          
+          # Replace 'done[0] = False' with 'done[0] = T.int32(0)' 
+          # and 'done[0] = True' with 'done[0] = T.int32(1)'
+          sed -i.bak 's/done\[0\] = False/done[0] = T.int32(0)/g' "$BUGGY_FILE"
+          sed -i.bak 's/done\[0\] = True/done[0] = T.int32(1)/g' "$BUGGY_FILE"
+          
+          echo "=== Patched file ==="
+          grep -n "done\[0\]" "$BUGGY_FILE" || echo "Pattern replaced"
+        else
+          echo "File not found, skipping patch"
+        fi
+        
+    - name: Compile for iOS
       run: |
         mkdir -p ./output
         
-        # Try compile with speculative decoding disabled
         python -m mlc_llm compile ./output/config/mlc-chat-config.json \
           --device iphone \
-          --opt "flashinfer=0;cublas_gemm=0;faster_transformer=0;cudagraph=0;cutlass=0" \
-          --output ./output/model-iphone.tar \
-          2>&1 || {
-            echo "=== First attempt failed, trying alternative approach ==="
-            
-            # Alternative: Compile with overrides to disable problematic features
-            python -m mlc_llm compile ./output/config/mlc-chat-config.json \
-              --device iphone \
-              --overrides "tensor_parallel_shards=1" \
-              --output ./output/model-iphone.tar
-          }
+          --output ./output/model-iphone.tar
         
         echo "=== Compiled output ==="
         ls -la ./output/
