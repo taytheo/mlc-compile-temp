@@ -16,118 +16,59 @@ jobs:
         python-version: '3.11'
         activate-environment: mlc
         
-    - name: Install dependencies
+    - name: Install MLC-LLM from pip (pre-built)
       shell: bash -el {0}
       run: |
-        pip install numpy decorator attrs typing_extensions psutil scipy tornado "huggingface_hub[cli]"
-        pip install safetensors transformers torch tqdm sentencepiece tiktoken
+        # Try installing pre-built mlc-llm
+        pip install --pre mlc-llm-nightly mlc-ai-nightly -f https://mlc.ai/wheels || true
+        pip install "huggingface_hub[cli]" safetensors transformers torch tqdm sentencepiece tiktoken
         
-    - name: Clone and Build MLC-LLM
+        # Check if mlc_llm works
+        python -c "import mlc_llm; print('mlc_llm OK')" || echo "Need to build from source"
+        
+    - name: Build from source if needed
       shell: bash -el {0}
       run: |
+        # Check if already available
+        if python -c "import mlc_llm" 2>/dev/null; then
+          echo "MLC-LLM already available"
+          exit 0
+        fi
+        
+        echo "Building from source..."
+        pip install numpy decorator attrs typing_extensions psutil scipy tornado
+        
         git clone --recursive https://github.com/mlc-ai/mlc-llm.git
         cd mlc-llm
         
-        mkdir -p build && cd build
+        # Use cmake preset for simpler build
+        pip install cmake ninja
         
-        cat > config.cmake << 'EOF'
+        cd python
+        pip install -e . --no-build-isolation || echo "Trying alternative install"
+        cd ..
+        
+        # If that didn't work, try manual build
+        if ! python -c "import mlc_llm" 2>/dev/null; then
+          mkdir -p build && cd build
+          
+          cat > config.cmake << 'EOF'
         set(USE_METAL ON)
         set(USE_CUDA OFF)
         set(USE_VULKAN OFF)
         set(USE_OPENCL OFF)
         set(USE_FLASHINFER OFF)
         set(CMAKE_BUILD_TYPE Release)
-        set(HIDE_PRIVATE_SYMBOLS ON)
         EOF
-        
-        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-        make -j$(sysctl -n hw.ncpu)
-        
-        echo "=== Finding ALL dylib files ==="
-        find . -name "*.dylib" -type f -exec ls -la {} \;
-        
-        echo "=== File types ==="
-        find . -name "libtvm*.dylib" -type f -exec file {} \;
-        
-    - name: Setup library paths
-      shell: bash -el {0}
-      run: |
-        cd mlc-llm/build
-        
-        # Find the correct libtvm_ffi.dylib (should be in tvm/3rdparty/tvm-ffi/)
-        echo "=== Searching for tvm_ffi shared library ==="
-        find . -name "libtvm_ffi*" -type f -exec file {} \;
-        
-        # The correct shared library should be in tvm/3rdparty/tvm-ffi/
-        TVM_FFI_PATH=$(find . -path "*/tvm-ffi/*" -name "libtvm_ffi.dylib" -type f 2>/dev/null | head -1)
-        echo "Found tvm_ffi at: $TVM_FFI_PATH"
-        
-        # Create unified lib directory
-        mkdir -p unified_lib
-        
-        # Copy the correct libraries
-        cp tvm/libtvm.dylib unified_lib/ 2>/dev/null || true
-        cp tvm/libtvm_runtime.dylib unified_lib/ 2>/dev/null || true
-        
-        # Find and copy the SHARED libtvm_ffi.dylib (not static)
-        for f in $(find . -name "libtvm_ffi.dylib" -type f); do
-          if file "$f" | grep -q "shared library"; then
-            echo "Copying shared library: $f"
-            cp "$f" unified_lib/
-            break
-          fi
-        done
-        
-        # If no shared library found, check the tvm-ffi build output
-        if [ ! -f unified_lib/libtvm_ffi.dylib ]; then
-          # Try copying from the lib/libtvm_ffi.dylib location mentioned in build
-          TVM_FFI_SHARED=$(find . -path "*/lib/libtvm_ffi.dylib" -type f 2>/dev/null | head -1)
-          if [ -n "$TVM_FFI_SHARED" ]; then
-            cp "$TVM_FFI_SHARED" unified_lib/ 2>/dev/null || true
-          fi
+          
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          make -j$(sysctl -n hw.ncpu)
+          cd ..
+          
+          # Set paths
+          echo "export TVM_LIBRARY_PATH=$(pwd)/build/tvm" >> $GITHUB_ENV
+          echo "export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:\$PYTHONPATH" >> $GITHUB_ENV
         fi
-        
-        cp libmlc_llm.dylib unified_lib/ 2>/dev/null || true
-        cp libmlc_llm_module.dylib unified_lib/ 2>/dev/null || true
-        
-        echo "=== unified_lib contents ==="
-        ls -la unified_lib/
-        
-        echo "=== File types in unified_lib ==="
-        file unified_lib/*.dylib
-        
-    - name: Test MLC-LLM Import
-      shell: bash -el {0}
-      run: |
-        cd mlc-llm
-        
-        # Use the tvm subdirectory which has the actual shared libraries
-        BUILD_LIB=$(pwd)/build/tvm
-        
-        export TVM_FFI_LIBRARY_PATH=$BUILD_LIB
-        export TVM_LIBRARY_PATH=$BUILD_LIB
-        export DYLD_LIBRARY_PATH=$BUILD_LIB:$(pwd)/build:$DYLD_LIBRARY_PATH
-        export PYTHONPATH=$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$(pwd)/3rdparty/tvm/python:$(pwd)/python:$PYTHONPATH
-        
-        echo "=== Checking library path ==="
-        ls -la $BUILD_LIB/*.dylib
-        file $BUILD_LIB/*.dylib
-        
-        python << 'PYEOF'
-        import os
-        print(f"TVM_FFI_LIBRARY_PATH: {os.environ.get('TVM_FFI_LIBRARY_PATH', 'NOT SET')}")
-        
-        import tvm_ffi
-        print("tvm_ffi OK")
-        
-        import tvm
-        print("tvm OK")
-        
-        import mlc_llm
-        print("mlc_llm OK")
-        PYEOF
-        
-        python -m mlc_llm --help | head -5
         
     - name: Download Qwen3-4B Model
       shell: bash -el {0}
@@ -138,38 +79,37 @@ jobs:
         print("Download complete")
         PYEOF
         
-        ls -la ./qwen3-4b-base/
-        
     - name: Generate Config and Compile
       shell: bash -el {0}
       run: |
-        cd mlc-llm
+        # Set paths if built from source
+        if [ -d "mlc-llm" ]; then
+          cd mlc-llm
+          export TVM_LIBRARY_PATH=$(pwd)/build/tvm
+          export DYLD_LIBRARY_PATH=$(pwd)/build/tvm:$DYLD_LIBRARY_PATH
+          export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
+          cd ..
+        fi
         
-        BUILD_LIB=$(pwd)/build/tvm
-        export TVM_FFI_LIBRARY_PATH=$BUILD_LIB
-        export TVM_LIBRARY_PATH=$BUILD_LIB
-        export DYLD_LIBRARY_PATH=$BUILD_LIB:$(pwd)/build:$DYLD_LIBRARY_PATH
-        export PYTHONPATH=$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$(pwd)/3rdparty/tvm/python:$(pwd)/python:$PYTHONPATH
+        mkdir -p output
         
-        mkdir -p ../output
-        
-        python -m mlc_llm gen_config ../qwen3-4b-base \
+        mlc_llm gen_config ./qwen3-4b-base \
           --quantization q4f16_1 \
           --prefill-chunk-size 128 \
           --context-window-size 4096 \
           --max-batch-size 1 \
           --conv-template qwen2 \
-          --output ../output/config
+          --output ./output/config
         
-        cat ../output/config/mlc-chat-config.json
+        cat ./output/config/mlc-chat-config.json
         
-        python -m mlc_llm convert_weight ../qwen3-4b-base \
+        mlc_llm convert_weight ./qwen3-4b-base \
           --quantization q4f16_1 \
-          --output ../output/weights
+          --output ./output/weights
         
-        python -m mlc_llm compile ../output/config/mlc-chat-config.json \
+        mlc_llm compile ./output/config/mlc-chat-config.json \
           --device iphone \
-          --output ../output/model-iphone.tar
+          --output ./output/model-iphone.tar
         
     - name: Extract compiled files
       run: |
