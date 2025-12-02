@@ -22,6 +22,7 @@ jobs:
         
     - name: Install dependencies
       run: |
+        # Fix for Rust/Tokenizers version compatibility
         pip install "tokenizers>=0.19.0"
         pip install numpy decorator attrs typing_extensions psutil scipy tornado
         pip install safetensors "transformers>=4.40.0" tqdm sentencepiece tiktoken
@@ -31,6 +32,9 @@ jobs:
       run: |
         git clone --recursive https://github.com/mlc-ai/mlc-llm.git
         cd mlc-llm
+        
+        # Ensure all submodules are fully updated (critical for tvm_ffi)
+        git submodule update --init --recursive
         
         mkdir -p build && cd build
         
@@ -49,25 +53,35 @@ jobs:
         
         echo "=== Build complete ==="
         ls -la *.dylib 2>/dev/null || true
-        ls -la tvm/*.dylib 2>/dev/null || true
         
-    - name: Setup Python paths and test import
+    - name: Install Python Packages (Development Mode)
       run: |
         cd mlc-llm
+        
         export TVM_LIBRARY_PATH=$(pwd)/build/tvm
         export DYLD_LIBRARY_PATH=$(pwd)/build/tvm:$(pwd)/build:$DYLD_LIBRARY_PATH
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
+        echo "=== Installing TVM Python package ==="
+        cd 3rdparty/tvm/python
+        pip install -e .
+        cd ../../..
+        
+        echo "=== Installing MLC-LLM Python package ==="
+        cd python
+        pip install -e .
+        cd ..
+        
+        echo "=== Verifying Installation ==="
         python -c "import tvm; print('TVM version:', tvm.__version__)"
         python -c "import mlc_llm; print('MLC-LLM imported successfully')"
-        python -m mlc_llm --help | head -5
         
     - name: Download Qwen3-4B Model
       run: |
         cd mlc-llm
+        
+        # Set library paths for runtime
         export TVM_LIBRARY_PATH=$(pwd)/build/tvm
         export DYLD_LIBRARY_PATH=$(pwd)/build/tvm:$(pwd)/build:$DYLD_LIBRARY_PATH
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
         python << 'PYEOF'
         from huggingface_hub import snapshot_download
@@ -75,17 +89,16 @@ jobs:
         print('Download complete')
         PYEOF
         
-        ls -la ../qwen3-4b-base/
-        
     - name: Generate Config and Compile
       run: |
         cd mlc-llm
+        
         export TVM_LIBRARY_PATH=$(pwd)/build/tvm
         export DYLD_LIBRARY_PATH=$(pwd)/build/tvm:$(pwd)/build:$DYLD_LIBRARY_PATH
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         
         mkdir -p ../output
         
+        # Generate config
         python -m mlc_llm gen_config ../qwen3-4b-base \
           --quantization q4f16_1 \
           --prefill-chunk-size 128 \
@@ -94,12 +107,12 @@ jobs:
           --conv-template qwen2 \
           --output ../output/config
         
-        cat ../output/config/mlc-chat-config.json
-        
+        # Convert weights
         python -m mlc_llm convert_weight ../qwen3-4b-base \
           --quantization q4f16_1 \
           --output ../output/weights
         
+        # Compile for iOS
         python -m mlc_llm compile ../output/config/mlc-chat-config.json \
           --device iphone \
           --output ../output/model-iphone.tar
@@ -109,7 +122,6 @@ jobs:
         cd output
         tar -xvf model-iphone.tar
         ls -lh *.o 2>/dev/null || echo "No .o files"
-        cat config/mlc-chat-config.json
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
