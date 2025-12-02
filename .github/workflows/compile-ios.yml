@@ -40,6 +40,34 @@ jobs:
         pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         pip install huggingface_hub
 
+    - name: Patch batch_spec_verify.py bug (bool type issue)
+      run: |
+        SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])")
+        FILE="$SITE_PKG/mlc_llm/op/batch_spec_verify.py"
+        echo "=== Patching $FILE ==="
+        
+        # Also patch the source copy
+        SRC_FILE="mlc-llm/python/mlc_llm/op/batch_spec_verify.py"
+        
+        for F in "$FILE" "$SRC_FILE"; do
+          if [ -f "$F" ]; then
+            echo "Patching: $F"
+            # Change bool type to int32 for done and pred variables
+            sed -i '' 's/done = _var("bool")/done = _var("int32")/g' "$F"
+            sed -i '' 's/pred_shared = T.alloc_buffer((1,), "bool", scope="shared")/pred_shared = T.alloc_buffer((1,), "int32", scope="shared")/g' "$F"
+            sed -i '' 's/pred_local = T.alloc_buffer((1,), "bool", scope="local")/pred_local = T.alloc_buffer((1,), "int32", scope="local")/g' "$F"
+            # Change boolean assignments to int
+            sed -i '' 's/done\[0\] = False/done[0] = 0/g' "$F"
+            sed -i '' 's/done\[0\] = True/done[0] = 1/g' "$F"
+            # Change T.Not(done[0]) to done[0] == 0
+            sed -i '' 's/while T.Not(done\[0\]):/while done[0] == 0:/g' "$F"
+            # Change pred comparisons
+            sed -i '' 's/if pred_local\[0\]:/if pred_local[0] != 0:/g' "$F"
+            echo "=== Patched content (lines 85-125) ==="
+            sed -n '85,125p' "$F"
+          fi
+        done
+
     - name: Create mlc-package-config.json for Qwen3
       run: |
         cd mlc-llm/ios/MLCChat
