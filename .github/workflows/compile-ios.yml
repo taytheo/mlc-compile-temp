@@ -14,107 +14,117 @@ jobs:
 
     steps:
     - name: Setup Conda
-      uses: conda-incubator/setup-miniconda@v3
+      uses: conda-incubator/setup-miniconda@v2
       with:
         auto-update-conda: true
         python-version: "3.11"
         activate-environment: mlc
-
-    - name: Install dependencies
-      run: |
-        brew install cmake git-lfs
-        git lfs install
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        source $HOME/.cargo/env
-        rustc --version
-
-    - name: Clone MLC-LLM source
-      run: |
-        git clone https://github.com/mlc-ai/mlc-llm.git
-        cd mlc-llm
-        git log --oneline -20
-        git submodule update --init --recursive
 
     - name: Install MLC-LLM Python package
       run: |
         pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         pip install huggingface_hub
 
-    - name: Patch bool type bugs in mlc_llm
+    - name: Patch batch_spec_verify.py ONLY
       run: |
         SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])")
-        echo "Site packages: $SITE_PKG"
-        for F in "$SITE_PKG/mlc_llm/op/"*.py; do
-          if [ -f "$F" ]; then
-            sed -i '' 's/_var("bool")/_var("int32")/g' "$F"
-            sed -i '' 's/"bool", scope="shared"/"int32", scope="shared"/g' "$F"
-            sed -i '' 's/"bool", scope="local"/"int32", scope="local"/g' "$F"
-            sed -i '' 's/(1,), "bool"/(1,), "int32"/g' "$F"
-            sed -i '' 's/\[0\] = False/[0] = 0/g' "$F"
-            sed -i '' 's/\[0\] = True/[0] = 1/g' "$F"
-          fi
-        done
-        echo "MLC-LLM patch complete"
+        BSV="$SITE_PKG/mlc_llm/op/batch_spec_verify.py"
+        
+        echo "=== BEFORE PATCH ==="
+        grep -n 'alloc_buffer.*bool\|done\[0\]\|while.*T\.Not' "$BSV" | head -20 || echo "Pattern not found"
+        
+        python3 << 'PYEOF'
+        import site
+        import re
 
-    - name: Patch bool type bugs in TVM
-      run: |
-        SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])")
-        echo "Patching TVM files in: $SITE_PKG/tvm"
-        find "$SITE_PKG/tvm" -name "*.py" -exec grep -l "uint1\|\"bool\"" {} \; | while read F; do
-          echo "Patching: $F"
-          sed -i '' 's/"bool"/"int32"/g' "$F" || true
-          sed -i '' 's/uint1/int32/g' "$F" || true
-        done
-        if [ -f "$SITE_PKG/tvm/relax/backend/gpu_generic/sampling.py" ]; then
-          echo "Special patch for sampling.py"
-          sed -i '' 's/dtype="bool"/dtype="int32"/g' "$SITE_PKG/tvm/relax/backend/gpu_generic/sampling.py"
-        fi
-        echo "TVM patch complete"
+        file_path = f"{site.getsitepackages()[0]}/mlc_llm/op/batch_spec_verify.py"
 
-    - name: Download model weights
-      run: |
-        mkdir -p model_weights
-        python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
-        ls -la ./model_weights/Qwen3-4B-q4f16_1-MLC/
+        with open(file_path, 'r') as f:
+            content = f.read()
 
-    - name: Try compile
-      continue-on-error: true
-      id: compile
-      run: |
-        mkdir -p ./output
-        TVM_BACKTRACE=1 python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/qwen3_q4f16_1-iphone.tar 2>&1 | tee compile_log.txt || echo "Compilation failed"
-        if [ -f ./output/qwen3_q4f16_1-iphone.tar ]; then
-          echo "compile_success=true" >> $GITHUB_OUTPUT
-        else
-          echo "compile_success=false" >> $GITHUB_OUTPUT
-        fi
-        ls -la ./output/ || echo "No output"
+        content = re.sub(
+            r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*"bool"\s*\)',
+            'T.alloc_buffer((1,), "int32")',
+            content
+        )
+        content = content.replace('done[0] = False', 'done[0] = 0')
+        content = content.replace('done[0] = True', 'done[0] = 1')
+        content = re.sub(
+            r'while\s+T\.Not\(done\[0\]\)\s*:',
+            'while done[0] == 0:',
+            content
+        )
 
-    - name: Download prebuilt MLC iOS libraries (fallback)
-      if: steps.compile.outputs.compile_success != 'true'
-      run: |
-        echo "Compilation failed, downloading pre-built libraries..."
-        mkdir -p ./prebuilt-libs
-        cd mlc-llm
-        git submodule update --init --recursive 3rdparty/tvm
-        ls -la ios/MLCChat/ || true
-        echo "Pre-built iOS package structure available in mlc-llm/ios/"
+        with open(file_path, 'w') as f:
+            f.write(content)
 
-    - name: Prepare artifacts
-      run: |
-        mkdir -p ./prebuilt
-        cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./prebuilt/ || true
-        ls -la ./model_weights/Qwen3-4B-q4f16_1-MLC/
+        print("Patch applied to batch_spec_verify.py")
+        PYEOF
+        
+                echo "=== AFTER PATCH ==="
+                grep -n 'alloc_buffer.*int32\|done\[0\] ==\|done\[0\] = 0\|done\[0\] = 1' "$BSV" | head -20 || echo "Verify failed"
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: qwen3-4b-ios-artifacts
-        path: |
-          output/
-          prebuilt/
-          model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json
-          model_weights/Qwen3-4B-q4f16_1-MLC/tokenizer.json
-          compile_log.txt
-        retention-days: 30
-        if-no-files-found: warn
+            - name: Download model and create custom config
+              run: |
+                mkdir -p model_weights
+                python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
+        
+                cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
+        
+                python3 << 'PYEOF'
+        import json
+
+        with open('./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json', 'r') as f:
+            config = json.load(f)
+
+        config['prefill_chunk_size'] = 128
+        config['context_window_size'] = 4096
+        config['model_config']['prefill_chunk_size'] = 128
+        config['model_config']['context_window_size'] = 4096
+        config['model_config']['max_batch_size'] = 1
+        config['model_config']['dtype'] = 'float16'
+
+        with open('./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json', 'w') as f:
+            json.dump(config, f, indent=2)
+
+        print("Config updated:")
+        print(f"  prefill_chunk_size: {config['prefill_chunk_size']}")
+        print(f"  context_window_size: {config['context_window_size']}")
+        print(f"  max_batch_size: {config['model_config']['max_batch_size']}")
+        PYEOF
+
+            - name: Compile for iOS
+              run: |
+                mkdir -p ./output
+
+                echo "=== Starting compilation ==="
+                python -m mlc_llm compile \
+                  ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json \
+                  --device iphone \
+                  --output ./output/qwen3_q4f16_1-iphone.tar \
+                  2>&1 | tee compile_log.txt
+          
+                echo "=== Compilation output ==="
+                ls -la ./output/
+
+            - name: Extract compiled files
+              if: success()
+              run: |
+                cd output
+                if [ -f qwen3_q4f16_1-iphone.tar ]; then
+                  tar -xvf qwen3_q4f16_1-iphone.tar
+                  echo "=== Extracted files ==="
+                  ls -lh
+                fi
+
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                name: qwen3-4b-ios-compiled
+                path: |
+                  output/*.o
+                  output/*.tar
+                  model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json
+                  compile_log.txt
+                retention-days: 30
+                if-no-files-found: warn
