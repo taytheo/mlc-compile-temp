@@ -80,7 +80,12 @@ jobs:
         fi
         
         echo "=== Installing MLC-LLM Python package ==="
-        pip install -e .
+        # Install without dependencies first to bypass flashinfer check
+        pip install --no-deps -e .
+        
+        # Manually install required dependencies (excluding flashinfer)
+        pip install fastapi uvicorn shortuuid prompt_toolkit openai ml_dtypes "torch>=2.0"
+        
         cd ..
         
         echo "=== Verifying Installation ==="
