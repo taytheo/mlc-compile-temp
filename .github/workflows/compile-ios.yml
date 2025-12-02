@@ -35,6 +35,9 @@ jobs:
     
     - name: Patch attach_sampler.py  # ← 이 스텝 추가!
       run: python3 .github/scripts/patch_attach_sampler.py
+    
+    - name: Apply comprehensive patch
+      run: python3 .github/scripts/patch_comprehensive.py
 
     - name: Download model and create custom config
       run: |
