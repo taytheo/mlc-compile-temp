@@ -25,28 +25,37 @@ jobs:
         pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         pip install huggingface_hub
 
-    - name: Patch batch_spec_verify.py ONLY
+    - name: Create and run patch script
       run: |
         SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])")
         BSV="$SITE_PKG/mlc_llm/op/batch_spec_verify.py"
         echo "=== BEFORE PATCH ==="
         grep -n 'alloc_buffer.*bool\|done\[0\]\|while.*T\.Not' "$BSV" | head -20 || echo "Pattern not found"
         
-        # YAML 파싱 문제를 피하기 위해 단순한 파이썬 코드 사용
-        python3 -c 'import re
+        # 파이썬 스크립트 파일 생성
+        cat > patch_script.py << "SCRIPT_EOF"
+import re
 import site
+
 pkg_path = site.getsitepackages()[0]
-file_path = pkg_path + "/mlc_llm/op/batch_spec_verify.py"
-with open(file_path, "r") as f:
+file_path = pkg_path + '/mlc_llm/op/batch_spec_verify.py'
+
+with open(file_path, 'r') as f:
     content = f.read()
+
 # 패치 적용
-content = re.sub(r"T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*\"bool\"\s*\)", "T.alloc_buffer((1,), \"int32\")", content)
-content = content.replace("done[0] = False", "done[0] = 0")
-content = content.replace("done[0] = True", "done[0] = 1")
-content = re.sub(r"while\s+T\.Not\(done\[0\]\)\s*:", "while done[0] == 0:", content)
-with open(file_path, "w") as f:
+content = re.sub(r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*"bool"\s*\)', 'T.alloc_buffer((1,), "int32")', content)
+content = content.replace('done[0] = False', 'done[0] = 0')
+content = content.replace('done[0] = True', 'done[0] = 1')
+content = re.sub(r'while\s+T\.Not\(done\[0\]\)\s*:', 'while done[0] == 0:', content)
+
+with open(file_path, 'w') as f:
     f.write(content)
-print("Patch applied to batch_spec_verify.py")'
+
+print('Patch applied to batch_spec_verify.py')
+SCRIPT_EOF
+        
+        python3 patch_script.py
         
         echo "=== AFTER PATCH ==="
         grep -n 'alloc_buffer.*int32\|done\[0\] ==\|done\[0\] = 0\|done\[0\] = 1' "$BSV" | head -20 || echo "Verify failed"
@@ -57,22 +66,30 @@ print("Patch applied to batch_spec_verify.py")'
         python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
         cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
         
-        # 간단한 파이썬 코드로 설정 수정
-        python3 -c 'import json
-with open("./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json", "r") as f:
+        # 설정 수정 스크립트 생성
+        cat > config_script.py << "SCRIPT_EOF"
+import json
+
+with open('./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json', 'r') as f:
     config = json.load(f)
-config["prefill_chunk_size"] = 128
-config["context_window_size"] = 4096
-config["model_config"]["prefill_chunk_size"] = 128
-config["model_config"]["context_window_size"] = 4096
-config["model_config"]["max_batch_size"] = 1
-config["model_config"]["dtype"] = "float16"
-with open("./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json", "w") as f:
+
+config['prefill_chunk_size'] = 128
+config['context_window_size'] = 4096
+config['model_config']['prefill_chunk_size'] = 128
+config['model_config']['context_window_size'] = 4096
+config['model_config']['max_batch_size'] = 1
+config['model_config']['dtype'] = 'float16'
+
+with open('./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json', 'w') as f:
     json.dump(config, f, indent=2)
-print("Config updated")
-print("  prefill_chunk_size: " + str(config["prefill_chunk_size"]))
-print("  context_window_size: " + str(config["context_window_size"]))
-print("  max_batch_size: " + str(config["model_config"]["max_batch_size"]))'
+
+print('Config updated')
+print('  prefill_chunk_size: ' + str(config['prefill_chunk_size']))
+print('  context_window_size: ' + str(config['context_window_size']))
+print('  max_batch_size: ' + str(config['model_config']['max_batch_size']))
+SCRIPT_EOF
+        
+        python3 config_script.py
 
     - name: Compile for iOS
       run: |
