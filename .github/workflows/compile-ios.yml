@@ -20,131 +20,66 @@ jobs:
         python-version: '3.11'
         activate-environment: mlc
         
-    - name: Install dependencies
+    - name: Install MLC-LLM from prebuilt wheel
       run: |
-        # Fix for Rust/Tokenizers version compatibility
-        pip install "tokenizers>=0.19.0"
-        pip install numpy decorator attrs typing_extensions psutil scipy tornado
-        pip install safetensors "transformers>=4.40.0" tqdm sentencepiece tiktoken
+        # Install prebuilt mlc-llm package (includes tvm runtime)
+        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly mlc-ai-nightly
+        
+        # Install additional dependencies
         pip install "huggingface_hub>=0.20.0"
         
-    - name: Clone and Build MLC-LLM
-      run: |
-        git clone --recursive https://github.com/mlc-ai/mlc-llm.git
-        cd mlc-llm
-        
-        # Ensure all submodules are fully updated (critical for tvm_ffi)
-        git submodule update --init --recursive
-        
-        mkdir -p build && cd build
-        
-        cat > config.cmake << 'EOF'
-        set(USE_METAL ON)
-        set(USE_CUDA OFF)
-        set(USE_VULKAN OFF)
-        set(USE_OPENCL OFF)
-        set(USE_FLASHINFER OFF)
-        set(CMAKE_BUILD_TYPE Release)
-        set(HIDE_PRIVATE_SYMBOLS ON)
-        EOF
-        
-        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-        make -j$(sysctl -n hw.ncpu)
-        
-        echo "=== Build complete ==="
-        ls -la *.dylib 2>/dev/null || true
-        
-    - name: Install Python Packages (Development Mode)
-      run: |
-        cd mlc-llm
-        
-        export TVM_LIBRARY_PATH=$(pwd)/build/tvm
-        export DYLD_LIBRARY_PATH=$(pwd)/build/tvm:$(pwd)/build:$DYLD_LIBRARY_PATH
-        
-        echo "=== Installing TVM-FFI Python package (from source) ==="
-        cd 3rdparty/tvm/3rdparty/tvm-ffi
-        pip install -e .
-        cd ../../../..
-
-        echo "=== Installing TVM Python package ==="
-        cd 3rdparty/tvm/python
-        pip install -e .
-        cd ../../..
-        
-        echo "=== Patching MLC-LLM requirements to remove FlashInfer ==="
-        cd python
-        # Remove flashinfer from pyproject.toml if it exists
-        if [ -f pyproject.toml ]; then
-          sed -i.bak '/flashinfer/d' pyproject.toml
-          echo "Removed flashinfer from pyproject.toml"
-        fi
-        # Remove flashinfer from setup.py if it exists
-        if [ -f setup.py ]; then
-          sed -i.bak '/flashinfer/d' setup.py
-          echo "Removed flashinfer from setup.py"
-        fi
-        
-        echo "=== Installing MLC-LLM Python package ==="
-        # Install without dependencies first to bypass flashinfer check
-        pip install --no-deps -e .
-        
-        # Manually install required runtime dependencies (excluding flashinfer)
-        pip install fastapi uvicorn shortuuid prompt_toolkit openai ml_dtypes "torch>=2.0"
-        pip install pandas datasets
-        
-        cd ..
-        
-        echo "=== Verifying Installation ==="
-        python -c "import tvm; print('TVM version:', tvm.__version__)"
-        python -c "import mlc_llm; print('MLC-LLM imported successfully')"
+        # Verify installation
+        python -c "import mlc_llm; print('MLC-LLM:', mlc_llm)"
+        mlc_llm --help | head -5
         
     - name: Download Qwen3-4B Model
       run: |
-        cd mlc-llm
-        
-        # Set library paths for runtime
-        export TVM_LIBRARY_PATH=$(pwd)/build/tvm
-        export DYLD_LIBRARY_PATH=$(pwd)/build/tvm:$(pwd)/build:$DYLD_LIBRARY_PATH
-        
-        python << 'PYEOF'
+        python -c "
         from huggingface_hub import snapshot_download
-        snapshot_download(repo_id='Qwen/Qwen3-4B', local_dir='../qwen3-4b-base')
+        snapshot_download(repo_id='Qwen/Qwen3-4B', local_dir='./qwen3-4b-base')
         print('Download complete')
-        PYEOF
+        "
+        ls -la ./qwen3-4b-base/
         
-    - name: Generate Config and Compile
+    - name: Generate Config
       run: |
-        cd mlc-llm
+        mkdir -p ./output/config
         
-        export TVM_LIBRARY_PATH=$(pwd)/build/tvm
-        export DYLD_LIBRARY_PATH=$(pwd)/build/tvm:$(pwd)/build:$DYLD_LIBRARY_PATH
-        
-        mkdir -p ../output
-        
-        # Generate config
-        python -m mlc_llm gen_config ../qwen3-4b-base \
+        mlc_llm gen_config ./qwen3-4b-base \
           --quantization q4f16_1 \
           --prefill-chunk-size 128 \
           --context-window-size 4096 \
           --max-batch-size 1 \
           --conv-template qwen2 \
-          --output ../output/config
+          --output ./output/config
         
-        # Convert weights
-        python -m mlc_llm convert_weight ../qwen3-4b-base \
+        echo "=== Generated config ==="
+        cat ./output/config/mlc-chat-config.json
+        
+    - name: Convert Weights
+      run: |
+        mlc_llm convert_weight ./qwen3-4b-base \
           --quantization q4f16_1 \
-          --output ../output/weights
+          --output ./output/weights
         
-        # Compile for iOS
-        python -m mlc_llm compile ../output/config/mlc-chat-config.json \
+        echo "=== Converted weights ==="
+        ls -lh ./output/weights/
+        
+    - name: Compile for iOS
+      run: |
+        mlc_llm compile ./output/config/mlc-chat-config.json \
           --device iphone \
-          --output ../output/model-iphone.tar
+          --output ./output/model-iphone.tar
+        
+        echo "=== Compiled output ==="
+        ls -la ./output/
         
     - name: Extract compiled files
       run: |
         cd output
         tar -xvf model-iphone.tar
-        ls -lh *.o 2>/dev/null || echo "No .o files"
+        ls -lh *.o 2>/dev/null || echo "Checking tar contents..."
+        tar -tvf model-iphone.tar
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -152,5 +87,6 @@ jobs:
         name: ios-compiled-libs
         path: |
           output/*.o
+          output/*.tar
           output/config/mlc-chat-config.json
         retention-days: 30
