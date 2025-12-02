@@ -31,7 +31,9 @@ jobs:
         BSV="$SITE_PKG/mlc_llm/op/batch_spec_verify.py"
         echo "=== BEFORE PATCH ==="
         grep -n 'alloc_buffer.*bool\|done\[0\]\|while.*T\.Not' "$BSV" | head -20 || echo "Pattern not found"
-        python3 << 'EOF'
+        
+        # Create a temporary Python script
+        cat > /tmp/patch_script.py << 'PYEOF'
 import site
 import re
 file_path = f"{site.getsitepackages()[0]}/mlc_llm/op/batch_spec_verify.py"
@@ -44,7 +46,9 @@ content = re.sub(r'while\s+T\.Not\(done\[0\]\)\s*:', 'while done[0] == 0:', cont
 with open(file_path, "w") as f:
     f.write(content)
 print("Patch applied to batch_spec_verify.py")
-EOF
+PYEOF
+        
+        python3 /tmp/patch_script.py
         echo "=== AFTER PATCH ==="
         grep -n 'alloc_buffer.*int32\|done\[0\] ==\|done\[0\] = 0\|done\[0\] = 1' "$BSV" | head -20 || echo "Verify failed"
 
@@ -53,7 +57,9 @@ EOF
         mkdir -p model_weights
         python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
         cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
-        python3 << 'EOF'
+        
+        # Create a temporary Python script
+        cat > /tmp/config_script.py << 'PYEOF'
 import json
 with open("./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json", "r") as f:
     config = json.load(f)
@@ -69,7 +75,9 @@ print("Config updated")
 print(f"  prefill_chunk_size: {config['prefill_chunk_size']}")
 print(f"  context_window_size: {config['context_window_size']}")
 print(f"  max_batch_size: {config['model_config']['max_batch_size']}")
-EOF
+PYEOF
+        
+        python3 /tmp/config_script.py
 
     - name: Compile for iOS
       run: |
