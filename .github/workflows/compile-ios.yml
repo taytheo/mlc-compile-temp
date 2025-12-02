@@ -21,7 +21,7 @@ jobs:
       run: |
         pip install numpy decorator attrs typing_extensions psutil scipy tornado "huggingface_hub[cli]"
         pip install safetensors transformers torch tqdm sentencepiece tiktoken
-        pip install apache-tvm-ffi
+        # DO NOT install apache-tvm-ffi - use source version
         
     - name: Clone and Build MLC-LLM
       shell: bash -el {0}
@@ -44,45 +44,65 @@ jobs:
         cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         make -j$(sysctl -n hw.ncpu)
         
-        echo "=== Finding all dylib files ==="
-        find . -name "*.dylib" -type f
-        
-        echo "=== Copying libraries to lib/ ==="
+        echo "=== Copying all libraries to single location ==="
         mkdir -p lib
-        find . -name "libtvm*.dylib" -exec cp {} lib/ \;
-        find . -name "libmlc*.dylib" -exec cp {} lib/ \;
+        cp tvm/libtvm.dylib lib/ 2>/dev/null || true
+        cp tvm/libtvm_runtime.dylib lib/ 2>/dev/null || true
+        cp lib/libtvm_ffi.dylib lib/ 2>/dev/null || true
+        cp libmlc_llm.dylib lib/ 2>/dev/null || true
+        cp libmlc_llm_module.dylib lib/ 2>/dev/null || true
+        
+        echo "=== Final lib/ contents ==="
         ls -la lib/
         
     - name: Test MLC-LLM Import
       shell: bash -el {0}
+      env:
+        TVM_FFI_LIBRARY_PATH: /Users/runner/work/mlc-compile-temp/mlc-compile-temp/mlc-llm/build/lib
+        TVM_LIBRARY_PATH: /Users/runner/work/mlc-compile-temp/mlc-compile-temp/mlc-llm/build/lib
       run: |
         cd mlc-llm
         
-        BUILD_DIR=$(pwd)/build
+        BUILD_LIB=$(pwd)/build/lib
         
-        # Set library paths - include both lib/ and tvm/ subdirectories
-        export TVM_LIBRARY_PATH=$BUILD_DIR/lib:$BUILD_DIR/tvm:$BUILD_DIR
-        export DYLD_LIBRARY_PATH=$BUILD_DIR/lib:$BUILD_DIR/tvm:$BUILD_DIR:$DYLD_LIBRARY_PATH
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
+        # Set environment BEFORE importing
+        export TVM_FFI_LIBRARY_PATH=$BUILD_LIB
+        export TVM_LIBRARY_PATH=$BUILD_LIB
+        export DYLD_LIBRARY_PATH=$BUILD_LIB:$DYLD_LIBRARY_PATH
         
-        echo "=== Library files ==="
-        ls -la $BUILD_DIR/lib/*.dylib 2>/dev/null || echo "No dylib in lib"
-        ls -la $BUILD_DIR/tvm/*.dylib 2>/dev/null || echo "No dylib in tvm"
-        ls -la $BUILD_DIR/*.dylib 2>/dev/null || echo "No dylib in build root"
+        # IMPORTANT: tvm_ffi path must come FIRST
+        export PYTHONPATH=$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$(pwd)/3rdparty/tvm/python:$(pwd)/python:$PYTHONPATH
+        
+        echo "=== Environment ==="
+        echo "TVM_FFI_LIBRARY_PATH=$TVM_FFI_LIBRARY_PATH"
+        echo "TVM_LIBRARY_PATH=$TVM_LIBRARY_PATH"
+        echo "PYTHONPATH=$PYTHONPATH"
         
         echo "=== Testing imports ==="
-        python -c "import tvm_ffi; print('tvm_ffi OK')"
-        python -c "import tvm; print('tvm OK')"
-        python -c "import mlc_llm; print('mlc_llm OK')"
+        python -c "
+import os
+os.environ['TVM_FFI_LIBRARY_PATH'] = '$BUILD_LIB'
+os.environ['TVM_LIBRARY_PATH'] = '$BUILD_LIB'
+
+import tvm_ffi
+print('tvm_ffi OK')
+
+import tvm
+print('tvm OK')
+
+import mlc_llm
+print('mlc_llm OK')
+"
+        
         python -m mlc_llm --help | head -5
         
     - name: Download Qwen3-4B Model
       shell: bash -el {0}
       run: |
         python -c "
-        from huggingface_hub import snapshot_download
-        snapshot_download(repo_id='Qwen/Qwen3-4B', local_dir='./qwen3-4b-base')
-        "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='Qwen/Qwen3-4B', local_dir='./qwen3-4b-base')
+"
         ls -la ./qwen3-4b-base/
         
     - name: Generate Config and Compile
@@ -90,10 +110,11 @@ jobs:
       run: |
         cd mlc-llm
         
-        BUILD_DIR=$(pwd)/build
-        export TVM_LIBRARY_PATH=$BUILD_DIR/lib:$BUILD_DIR/tvm:$BUILD_DIR
-        export DYLD_LIBRARY_PATH=$BUILD_DIR/lib:$BUILD_DIR/tvm:$BUILD_DIR:$DYLD_LIBRARY_PATH
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
+        BUILD_LIB=$(pwd)/build/lib
+        export TVM_FFI_LIBRARY_PATH=$BUILD_LIB
+        export TVM_LIBRARY_PATH=$BUILD_LIB
+        export DYLD_LIBRARY_PATH=$BUILD_LIB:$DYLD_LIBRARY_PATH
+        export PYTHONPATH=$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$(pwd)/3rdparty/tvm/python:$(pwd)/python:$PYTHONPATH
         
         mkdir -p ../output
         
