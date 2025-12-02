@@ -16,37 +16,22 @@ jobs:
         python-version: '3.11'
         activate-environment: mlc
         
-    - name: Install MLC-LLM via Conda
+    - name: Install dependencies
       shell: bash -el {0}
       run: |
-        conda install -c conda-forge git-lfs -y
+        pip install numpy decorator attrs typing_extensions psutil scipy tornado "huggingface_hub[cli]"
+        pip install safetensors transformers torch tqdm sentencepiece tiktoken
         
-        # Install pre-built mlc-llm from mlc-ai channel
-        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly mlc-ai-nightly 2>/dev/null || true
-        
-        # If pip doesn't work, try building
-        echo "Checking if mlc_llm is available..."
-        python -c "import mlc_llm; print('OK')" 2>/dev/null || echo "Need to build from source"
-        
-    - name: Clone and Build MLC-LLM (if needed)
+    - name: Clone and Build MLC-LLM
       shell: bash -el {0}
       run: |
-        # Check if already installed
-        if python -c "import mlc_llm" 2>/dev/null; then
-          echo "MLC-LLM already available via pip"
-          exit 0
-        fi
-        
-        echo "Building from source..."
         git clone --recursive https://github.com/mlc-ai/mlc-llm.git
         cd mlc-llm
         
-        # Build using the official script
         pip install numpy decorator attrs typing_extensions psutil scipy tornado
         
         mkdir -p build && cd build
         
-        # Create proper config
         cat > config.cmake << 'EOF'
         set(USE_METAL ON)
         set(USE_CUDA OFF)
@@ -60,17 +45,39 @@ jobs:
         cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         make -j$(sysctl -n hw.ncpu)
         
-        # Install Python package
-        cd ..
-        pip install -e ./python
+        echo "=== Built libraries ==="
+        ls -la lib/*.dylib 2>/dev/null || ls -la *.dylib
         
-        echo "=== Checking installation ==="
-        python -c "import mlc_llm; print('MLC-LLM installed')"
+    - name: Setup Python environment
+      shell: bash -el {0}
+      run: |
+        cd mlc-llm
+        
+        # Set library path
+        export TVM_LIBRARY_PATH=$(pwd)/build/lib
+        export DYLD_LIBRARY_PATH=$(pwd)/build/lib:$DYLD_LIBRARY_PATH
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
+        
+        # Install minimal dependencies (skip flashinfer)
+        pip install safetensors transformers sentencepiece tiktoken tqdm
+        
+        # Test import
+        python -c "
+        import sys
+        sys.path.insert(0, '$(pwd)/python')
+        sys.path.insert(0, '$(pwd)/3rdparty/tvm/python')
+        import os
+        os.environ['TVM_LIBRARY_PATH'] = '$(pwd)/build/lib'
+        
+        from tvm import register_global_func
+        print('TVM OK')
+        import mlc_llm
+        print('MLC-LLM OK')
+        "
         
     - name: Download Qwen3-4B Model
       shell: bash -el {0}
       run: |
-        pip install "huggingface_hub[cli]"
         python -c "
         from huggingface_hub import snapshot_download
         snapshot_download(repo_id='Qwen/Qwen3-4B', local_dir='./qwen3-4b-base')
@@ -80,29 +87,35 @@ jobs:
     - name: Generate Config and Compile
       shell: bash -el {0}
       run: |
-        mkdir -p output
+        cd mlc-llm
+        
+        export TVM_LIBRARY_PATH=$(pwd)/build/lib
+        export DYLD_LIBRARY_PATH=$(pwd)/build/lib:$DYLD_LIBRARY_PATH
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
+        
+        mkdir -p ../output
         
         # Generate config with small buffers
-        mlc_llm gen_config ./qwen3-4b-base \
+        python -m mlc_llm gen_config ../qwen3-4b-base \
           --quantization q4f16_1 \
           --prefill-chunk-size 128 \
           --context-window-size 4096 \
           --max-batch-size 1 \
           --conv-template qwen2 \
-          --output ./output/config
+          --output ../output/config
         
         echo "=== Generated config ==="
-        cat ./output/config/mlc-chat-config.json
+        cat ../output/config/mlc-chat-config.json
         
         # Convert weights
-        mlc_llm convert_weight ./qwen3-4b-base \
+        python -m mlc_llm convert_weight ../qwen3-4b-base \
           --quantization q4f16_1 \
-          --output ./output/weights
+          --output ../output/weights
         
         # Compile for iOS
-        mlc_llm compile ./output/config/mlc-chat-config.json \
+        python -m mlc_llm compile ../output/config/mlc-chat-config.json \
           --device iphone \
-          --output ./output/model-iphone.tar
+          --output ../output/model-iphone.tar
         
     - name: Extract compiled files
       run: |
