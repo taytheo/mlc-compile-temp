@@ -20,85 +20,50 @@ jobs:
         python-version: '3.11'
         activate-environment: mlc
         
-    - name: Install specific MLC-LLM version
+    - name: Install MLC-LLM from prebuilt wheel
       run: |
-        # Try installing a specific older version that's known to work
-        # First, list available versions
-        pip index versions mlc-llm-nightly-cpu 2>/dev/null || true
-        
-        # Install specific version - try 0.18 series which was more stable
-        pip install mlc-ai-nightly-cpu==0.18.dev224 mlc-llm-nightly-cpu==0.18.dev95 \
-          -f https://mlc.ai/wheels 2>/dev/null || {
-          echo "Specific version not found, trying latest with workaround..."
-          pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
-        }
-        
-        # Install additional dependencies
+        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         pip install "huggingface_hub>=0.20.0"
         
-        # Check installed version
         pip show mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         
-    - name: Download Qwen3-4B-Base Model
+    - name: Download Pre-compiled Qwen3-4B MLC Model
       run: |
-        python -c "
-        from huggingface_hub import snapshot_download
-        snapshot_download(repo_id='Qwen/Qwen3-4B', local_dir='./qwen3-4b-base')
-        print('Download complete')
-        "
-        ls -la ./qwen3-4b-base/
+        python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./qwen3-4b-mlc'); print('Download complete')"
         
-    - name: Generate Config
-      run: |
-        mkdir -p ./output/config
-        
-        python -m mlc_llm gen_config ./qwen3-4b-base \
-          --quantization q4f16_1 \
-          --prefill-chunk-size 128 \
-          --context-window-size 4096 \
-          --max-batch-size 1 \
-          --conv-template qwen2 \
-          --output ./output/config
-        
-        echo "=== Generated config ==="
-        cat ./output/config/mlc-chat-config.json
-        
-    - name: Convert Weights
-      run: |
-        python -m mlc_llm convert_weight ./qwen3-4b-base \
-          --quantization q4f16_1 \
-          --output ./output/weights
-        
-        echo "=== Converted weights ==="
-        ls -lh ./output/weights/
+        echo "=== Downloaded model files ==="
+        ls -la ./qwen3-4b-mlc/
+        cat ./qwen3-4b-mlc/mlc-chat-config.json
         
     - name: Patch batch_spec_verify bug
       run: |
-        # Find and patch the buggy file
         SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
         BUGGY_FILE="$SITE_PACKAGES/mlc_llm/op/batch_spec_verify.py"
         
         if [ -f "$BUGGY_FILE" ]; then
-          echo "Found buggy file: $BUGGY_FILE"
+          echo "Patching: $BUGGY_FILE"
+          cp "$BUGGY_FILE" "$BUGGY_FILE.bak"
           
-          # Replace 'done[0] = False' with 'done[0] = T.int32(0)' 
-          # and 'done[0] = True' with 'done[0] = T.int32(1)'
-          sed -i.bak 's/done\[0\] = False/done[0] = T.int32(0)/g' "$BUGGY_FILE"
-          sed -i.bak 's/done\[0\] = True/done[0] = T.int32(1)/g' "$BUGGY_FILE"
+          # Use sed to fix the bug - change bool buffer to int32 and boolean values to integers
+          sed -i.tmp 's/T\.alloc_buffer((1,), "bool")/T.alloc_buffer((1,), "int32")/g' "$BUGGY_FILE"
+          sed -i.tmp 's/done\[0\] = False/done[0] = 0/g' "$BUGGY_FILE"
+          sed -i.tmp 's/done\[0\] = True/done[0] = 1/g' "$BUGGY_FILE"
           
-          echo "=== Patched file ==="
-          grep -n "done\[0\]" "$BUGGY_FILE" || echo "Pattern replaced"
+          echo "=== Patched lines ==="
+          grep -n "done\[0\]" "$BUGGY_FILE" || echo "Checking alloc_buffer..."
+          grep -n "alloc_buffer" "$BUGGY_FILE" | head -5
         else
-          echo "File not found, skipping patch"
+          echo "File not found at $BUGGY_FILE, listing site-packages..."
+          ls -la "$SITE_PACKAGES/mlc_llm/op/" || echo "mlc_llm/op not found"
         fi
         
     - name: Compile for iOS
       run: |
         mkdir -p ./output
         
-        python -m mlc_llm compile ./output/config/mlc-chat-config.json \
+        python -m mlc_llm compile ./qwen3-4b-mlc/mlc-chat-config.json \
           --device iphone \
-          --output ./output/model-iphone.tar
+          --output ./output/qwen3_q4f16_1-iphone.tar
         
         echo "=== Compiled output ==="
         ls -la ./output/
@@ -106,10 +71,10 @@ jobs:
     - name: Extract compiled files
       run: |
         cd output
-        if [ -f model-iphone.tar ]; then
-          tar -xvf model-iphone.tar
-          ls -lh *.o 2>/dev/null || echo "Checking tar contents..."
-          tar -tvf model-iphone.tar
+        if [ -f qwen3_q4f16_1-iphone.tar ]; then
+          tar -xvf qwen3_q4f16_1-iphone.tar
+          ls -lh
+          tar -tvf qwen3_q4f16_1-iphone.tar
         else
           echo "No tar file found"
           ls -la
@@ -118,10 +83,10 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ios-compiled-libs
+        name: qwen3-4b-ios-compiled
         path: |
           output/*.o
           output/*.tar
-          output/config/mlc-chat-config.json
-          output/weights/
+          qwen3-4b-mlc/mlc-chat-config.json
+          qwen3-4b-mlc/*.bin
         retention-days: 30
