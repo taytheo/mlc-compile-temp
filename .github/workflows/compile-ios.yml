@@ -1,26 +1,76 @@
-Run mkdir -p ./output
-[2025-12-02 11:07:07] INFO auto_config.py:70: Found model configuration: qwen3-4b-mlc/mlc-chat-config.json
-[2025-12-02 11:07:07] INFO auto_config.py:154: Found model type: qwen3. Use `--model-type` to override.
-[2025-12-02 11:07:07] WARNING auto_target.py:378: --system-lib-prefix is automatically picked from the filename, qwen3_q4f16_1_, this allows us to use the filename as the model_lib in android/iOS builds. Please avoid renaming the .tar file when uploading the prebuilt.
-[2025-12-02 11:07:07] INFO compile.py:131: TOP LEVEL MODEL CONFIG BEFORE OVERRIDES: Qwen3Config(hidden_act='silu', hidden_size=2560, intermediate_size=9728, attention_bias=False, num_attention_heads=32, num_hidden_layers=36, num_key_value_heads=8, rms_norm_eps=1e-06, rope_theta=1000000, vocab_size=151936, tie_word_embeddings=True, context_window_size=40960, prefill_chunk_size=2048, tensor_parallel_shards=1, head_dim=128, dtype='float32', max_batch_size=128, weight_block_size=None, kwargs={})
-[2025-12-02 11:07:07] INFO compile.py:142: Creating model from: Qwen3Config(hidden_act='silu', hidden_size=2560, intermediate_size=9728, attention_bias=False, num_attention_heads=32, num_hidden_layers=36, num_key_value_heads=8, rms_norm_eps=1e-06, rope_theta=1000000, vocab_size=151936, tie_word_embeddings=True, context_window_size=40960, prefill_chunk_size=2048, tensor_parallel_shards=1, head_dim=128, dtype='float32', max_batch_size=128, weight_block_size=None, kwargs={})
-[2025-12-02 11:07:07] INFO compile.py:160: Exporting the model to TVM compiler
-[2025-12-02 11:07:07] INFO compile.py:166: Running optimizations using TVM
-[2025-12-02 11:07:07] INFO compile.py:192: Registering metadata: {'model_type': 'qwen3', 'quantization': 'q4f16_1', 'context_window_size': 40960, 'sliding_window_size': -1, 'attention_sink_size': -1, 'prefill_chunk_size': 2048, 'tensor_parallel_shards': 1, 'pipeline_parallel_stages': 1, 'disaggregation': False, 'kv_state_kind': 'kv_cache', 'max_batch_size': 128, 'active_vocab_size': None}
-error: cannot make const for type bool
- --> /Users/runner/miniconda3/envs/mlc/lib/python3.11/site-packages/mlc_llm/op/batch_spec_verify.py:114:25
-     |  
- 114 |                          done[0] = 0
-     |                          ^^^^^^^^^^^
-Compiling with arguments:
-  --config          Qwen3Config(hidden_act='silu', hidden_size=2560, intermediate_size=9728, attention_bias=False, num_attention_heads=32, num_hidden_layers=36, num_key_value_heads=8, rms_norm_eps=1e-06, rope_theta=1000000, vocab_size=151936, tie_word_embeddings=True, context_window_size=40960, prefill_chunk_size=2048, tensor_parallel_shards=1, head_dim=128, dtype='float32', max_batch_size=128, weight_block_size=None, kwargs={})
-  --quantization    GroupQuantize(name='q4f16_1', kind='group-quant', group_size=32, quantize_dtype='int4', storage_dtype='uint32', model_dtype='float16', linear_weight_layout='NK', quantize_embedding=True, quantize_final_fc=True, num_elem_per_storage=8, num_storage_per_group=4, max_int_value=7, tensor_parallel_shards=0)
-  --model-type      qwen3
-  --target          {'kind': 'metal', 'tag': '', 'keys': ['metal', 'gpu'], 'host': {'kind': 'llvm', 'tag': '', 'keys': ['arm_cpu', 'cpu'], 'mtriple': 'arm64-apple-darwin'}, 'max_num_threads': 256, 'max_function_args': 31, 'libs': ['iphoneos'], 'thread_warp_size': 1, 'max_shared_memory_per_block': 32768, 'max_threads_per_block': 256}
-  --opt             flashinfer=0;cublas_gemm=0;faster_transformer=0;cudagraph=0;cutlass=0;ipc_allreduce_strategy=NONE
-  --system-lib-prefix "qwen3_q4f16_1_"
-  --output          output/qwen3_q4f16_1-iphone.tar
-  --overrides       context_window_size=None;sliding_window_size=None;prefill_chunk_size=None;attention_sink_size=None;max_batch_size=None;tensor_parallel_shards=None;pipeline_parallel_stages=None;disaggregation=None
-note: run with `TVM_BACKTRACE=1` environment variable to display a backtrace.
-[11:07:09] /Users/catalyst/Workspace/mlc-ai-package-self-runner/_work/package/package/tvm/src/relax/ir/block_builder.cc:64: Warning: BlockBuilder destroyed with remaining blocks!
-Error: Process completed with exit code 1.
+name: Compile MLC-LLM for iOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  compile-ios:
+    runs-on: macos-14
+    timeout-minutes: 180
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+    - name: Setup Conda
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        auto-update-conda: true
+        python-version: "3.11"
+        activate-environment: mlc
+
+    - name: Install MLC-LLM from prebuilt wheel
+      run: |
+        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+        pip install huggingface_hub
+        pip show mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+
+    - name: Download Pre-compiled Qwen3-4B MLC Model
+      run: |
+        python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./qwen3-4b-mlc')"
+        ls -la ./qwen3-4b-mlc/
+        cat ./qwen3-4b-mlc/mlc-chat-config.json
+
+    - name: Create and apply patch
+      run: |
+        SITE_PACKAGES=$(python -c "import site; print(site.getsitepackages()[0])")
+        BUGGY_FILE="${SITE_PACKAGES}/mlc_llm/op/batch_spec_verify.py"
+        if [ -f "$BUGGY_FILE" ]; then
+          echo "Patching $BUGGY_FILE"
+          sed -i.bak 's/T\.alloc_buffer((1,), "bool")/T.alloc_buffer((1,), "int32")/g' "$BUGGY_FILE"
+          sed -i.bak 's/done\[0\] = False/done[0] = 0/g' "$BUGGY_FILE"
+          sed -i.bak 's/done\[0\] = True/done[0] = 1/g' "$BUGGY_FILE"
+          sed -i.bak 's/done\[0\] = T\.int32(0)/done[0] = 0/g' "$BUGGY_FILE"
+          sed -i.bak 's/done\[0\] = T\.int32(1)/done[0] = 1/g' "$BUGGY_FILE"
+          grep -n "alloc_buffer\|done\[" "$BUGGY_FILE" | head -20
+        else
+          echo "File not found"
+        fi
+
+    - name: Compile for iOS
+      run: |
+        mkdir -p ./output
+        python -m mlc_llm compile ./qwen3-4b-mlc/mlc-chat-config.json --device iphone --output ./output/qwen3_q4f16_1-iphone.tar
+        ls -la ./output/
+
+    - name: Extract compiled files
+      run: |
+        cd output
+        if [ -f qwen3_q4f16_1-iphone.tar ]; then
+          tar -xvf qwen3_q4f16_1-iphone.tar
+          ls -lh
+        else
+          echo "No tar file found"
+          ls -la
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: qwen3-4b-ios-compiled
+        path: |
+          output/*.o
+          output/*.tar
+          qwen3-4b-mlc/mlc-chat-config.json
+        retention-days: 30
