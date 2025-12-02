@@ -61,6 +61,11 @@ jobs:
         export TVM_LIBRARY_PATH=$(pwd)/build/tvm
         export DYLD_LIBRARY_PATH=$(pwd)/build/tvm:$(pwd)/build:$DYLD_LIBRARY_PATH
         
+        echo "=== Installing TVM-FFI Python package (from source) ==="
+        cd 3rdparty/tvm/3rdparty/tvm-ffi/python
+        pip install -e .
+        cd ../../../..
+
         echo "=== Installing TVM Python package ==="
         cd 3rdparty/tvm/python
         pip install -e .
@@ -85,7 +90,7 @@ jobs:
         
         # Manually install required runtime dependencies (excluding flashinfer)
         pip install fastapi uvicorn shortuuid prompt_toolkit openai ml_dtypes "torch>=2.0"
-        pip install "apache-tvm-ffi==0.1.4" pandas datasets
+        pip install pandas datasets
         
         cd ..
         
