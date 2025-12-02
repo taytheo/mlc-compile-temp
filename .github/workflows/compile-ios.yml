@@ -13,9 +13,6 @@ jobs:
         shell: bash -el {0}
 
     steps:
-    - name: Checkout repo for patch script
-      uses: actions/checkout@v4
-
     - name: Setup Conda
       uses: conda-incubator/setup-miniconda@v3
       with:
@@ -34,7 +31,20 @@ jobs:
         ls -la ./qwen3-4b-mlc/
 
     - name: Apply patch for batch_spec_verify bug
-      run: python .github/scripts/patch_mlc_bug.py
+      run: |
+        python3 -c "
+        import site, os, re
+        sp = site.getsitepackages()[0]
+        bf = os.path.join(sp, 'mlc_llm', 'op', 'batch_spec_verify.py')
+        if not os.path.exists(bf):
+            print('File not found'); exit(0)
+        with open(bf, 'r') as f: c = f.read()
+        c = re.sub(r'T\.alloc_buffer\s*\(\s*\(\s*1\s*,\s*\)\s*,\s*[\"'\'']bool[\"'\'']\s*\)', 'T.alloc_buffer((1,), \"int32\")', c)
+        c = re.sub(r'done\[0\]\s*=\s*False', 'done[0] = 0', c)
+        c = re.sub(r'done\[0\]\s*=\s*True', 'done[0] = 1', c)
+        with open(bf, 'w') as f: f.write(c)
+        print('Patch applied')
+        "
 
     - name: Compile for iOS
       run: |
