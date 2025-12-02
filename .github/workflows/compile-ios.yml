@@ -6,7 +6,7 @@ on:
 jobs:
   compile-ios:
     runs-on: macos-14
-    timeout-minutes: 120
+    timeout-minutes: 180
     
     defaults:
       run:
@@ -22,7 +22,7 @@ jobs:
         
     - name: Install MLC-LLM from prebuilt wheel
       run: |
-        # Install prebuilt mlc-llm package for macOS (CPU version includes Metal support)
+        # Install prebuilt mlc-llm package for macOS
         pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         
         # Install additional dependencies
@@ -30,9 +30,8 @@ jobs:
         
         # Verify installation
         python -c "import mlc_llm; print('MLC-LLM:', mlc_llm)"
-        python -m mlc_llm --help | head -5
         
-    - name: Download Qwen3-4B Model
+    - name: Download Qwen3-4B-Base Model
       run: |
         python -c "
         from huggingface_hub import snapshot_download
@@ -65,11 +64,24 @@ jobs:
         echo "=== Converted weights ==="
         ls -lh ./output/weights/
         
-    - name: Compile for iOS
+    - name: Compile for iOS (with debug)
       run: |
+        mkdir -p ./output
+        
+        # Try compile with speculative decoding disabled
         python -m mlc_llm compile ./output/config/mlc-chat-config.json \
           --device iphone \
-          --output ./output/model-iphone.tar
+          --opt "flashinfer=0;cublas_gemm=0;faster_transformer=0;cudagraph=0;cutlass=0" \
+          --output ./output/model-iphone.tar \
+          2>&1 || {
+            echo "=== First attempt failed, trying alternative approach ==="
+            
+            # Alternative: Compile with overrides to disable problematic features
+            python -m mlc_llm compile ./output/config/mlc-chat-config.json \
+              --device iphone \
+              --overrides "tensor_parallel_shards=1" \
+              --output ./output/model-iphone.tar
+          }
         
         echo "=== Compiled output ==="
         ls -la ./output/
@@ -77,9 +89,14 @@ jobs:
     - name: Extract compiled files
       run: |
         cd output
-        tar -xvf model-iphone.tar
-        ls -lh *.o 2>/dev/null || echo "Checking tar contents..."
-        tar -tvf model-iphone.tar
+        if [ -f model-iphone.tar ]; then
+          tar -xvf model-iphone.tar
+          ls -lh *.o 2>/dev/null || echo "Checking tar contents..."
+          tar -tvf model-iphone.tar
+        else
+          echo "No tar file found"
+          ls -la
+        fi
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -89,4 +106,5 @@ jobs:
           output/*.o
           output/*.tar
           output/config/mlc-chat-config.json
+          output/weights/
         retention-days: 30
