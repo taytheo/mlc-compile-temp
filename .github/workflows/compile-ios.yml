@@ -66,8 +66,20 @@ jobs:
         pip install -e .
         cd ../../..
         
-        echo "=== Installing MLC-LLM Python package ==="
+        echo "=== Patching MLC-LLM requirements to remove FlashInfer ==="
         cd python
+        # Remove flashinfer from pyproject.toml if it exists
+        if [ -f pyproject.toml ]; then
+          sed -i.bak '/flashinfer/d' pyproject.toml
+          echo "Removed flashinfer from pyproject.toml"
+        fi
+        # Remove flashinfer from setup.py if it exists
+        if [ -f setup.py ]; then
+          sed -i.bak '/flashinfer/d' setup.py
+          echo "Removed flashinfer from setup.py"
+        fi
+        
+        echo "=== Installing MLC-LLM Python package ==="
         pip install -e .
         cd ..
         
