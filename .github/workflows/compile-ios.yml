@@ -43,33 +43,79 @@ jobs:
         cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         make -j$(sysctl -n hw.ncpu)
         
-        mkdir -p lib
-        cp tvm/libtvm.dylib lib/ 2>/dev/null || true
-        cp tvm/libtvm_runtime.dylib lib/ 2>/dev/null || true
-        find . -name "libtvm_ffi.dylib" -exec cp {} lib/ \; 2>/dev/null || true
-        cp libmlc_llm.dylib lib/ 2>/dev/null || true
-        cp libmlc_llm_module.dylib lib/ 2>/dev/null || true
+        echo "=== Finding ALL dylib files ==="
+        find . -name "*.dylib" -type f -exec ls -la {} \;
         
-        ls -la lib/
+        echo "=== File types ==="
+        find . -name "libtvm*.dylib" -type f -exec file {} \;
+        
+    - name: Setup library paths
+      shell: bash -el {0}
+      run: |
+        cd mlc-llm/build
+        
+        # Find the correct libtvm_ffi.dylib (should be in tvm/3rdparty/tvm-ffi/)
+        echo "=== Searching for tvm_ffi shared library ==="
+        find . -name "libtvm_ffi*" -type f -exec file {} \;
+        
+        # The correct shared library should be in tvm/3rdparty/tvm-ffi/
+        TVM_FFI_PATH=$(find . -path "*/tvm-ffi/*" -name "libtvm_ffi.dylib" -type f 2>/dev/null | head -1)
+        echo "Found tvm_ffi at: $TVM_FFI_PATH"
+        
+        # Create unified lib directory
+        mkdir -p unified_lib
+        
+        # Copy the correct libraries
+        cp tvm/libtvm.dylib unified_lib/ 2>/dev/null || true
+        cp tvm/libtvm_runtime.dylib unified_lib/ 2>/dev/null || true
+        
+        # Find and copy the SHARED libtvm_ffi.dylib (not static)
+        for f in $(find . -name "libtvm_ffi.dylib" -type f); do
+          if file "$f" | grep -q "shared library"; then
+            echo "Copying shared library: $f"
+            cp "$f" unified_lib/
+            break
+          fi
+        done
+        
+        # If no shared library found, check the tvm-ffi build output
+        if [ ! -f unified_lib/libtvm_ffi.dylib ]; then
+          # Try copying from the lib/libtvm_ffi.dylib location mentioned in build
+          TVM_FFI_SHARED=$(find . -path "*/lib/libtvm_ffi.dylib" -type f 2>/dev/null | head -1)
+          if [ -n "$TVM_FFI_SHARED" ]; then
+            cp "$TVM_FFI_SHARED" unified_lib/ 2>/dev/null || true
+          fi
+        fi
+        
+        cp libmlc_llm.dylib unified_lib/ 2>/dev/null || true
+        cp libmlc_llm_module.dylib unified_lib/ 2>/dev/null || true
+        
+        echo "=== unified_lib contents ==="
+        ls -la unified_lib/
+        
+        echo "=== File types in unified_lib ==="
+        file unified_lib/*.dylib
         
     - name: Test MLC-LLM Import
       shell: bash -el {0}
       run: |
         cd mlc-llm
         
-        BUILD_LIB=$(pwd)/build/lib
+        # Use the tvm subdirectory which has the actual shared libraries
+        BUILD_LIB=$(pwd)/build/tvm
         
         export TVM_FFI_LIBRARY_PATH=$BUILD_LIB
         export TVM_LIBRARY_PATH=$BUILD_LIB
-        export DYLD_LIBRARY_PATH=$BUILD_LIB:$DYLD_LIBRARY_PATH
+        export DYLD_LIBRARY_PATH=$BUILD_LIB:$(pwd)/build:$DYLD_LIBRARY_PATH
         export PYTHONPATH=$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$(pwd)/3rdparty/tvm/python:$(pwd)/python:$PYTHONPATH
+        
+        echo "=== Checking library path ==="
+        ls -la $BUILD_LIB/*.dylib
+        file $BUILD_LIB/*.dylib
         
         python << 'PYEOF'
         import os
-        import sys
-        
-        build_lib = os.environ.get('TVM_FFI_LIBRARY_PATH', '')
-        print(f"TVM_FFI_LIBRARY_PATH: {build_lib}")
+        print(f"TVM_FFI_LIBRARY_PATH: {os.environ.get('TVM_FFI_LIBRARY_PATH', 'NOT SET')}")
         
         import tvm_ffi
         print("tvm_ffi OK")
@@ -99,10 +145,10 @@ jobs:
       run: |
         cd mlc-llm
         
-        BUILD_LIB=$(pwd)/build/lib
+        BUILD_LIB=$(pwd)/build/tvm
         export TVM_FFI_LIBRARY_PATH=$BUILD_LIB
         export TVM_LIBRARY_PATH=$BUILD_LIB
-        export DYLD_LIBRARY_PATH=$BUILD_LIB:$DYLD_LIBRARY_PATH
+        export DYLD_LIBRARY_PATH=$BUILD_LIB:$(pwd)/build:$DYLD_LIBRARY_PATH
         export PYTHONPATH=$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$(pwd)/3rdparty/tvm/python:$(pwd)/python:$PYTHONPATH
         
         mkdir -p ../output
