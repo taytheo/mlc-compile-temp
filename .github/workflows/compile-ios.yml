@@ -20,49 +20,67 @@ jobs:
         python-version: "3.11"
         activate-environment: mlc
 
-    - name: Install MLC-LLM from prebuilt wheel
+    - name: Install dependencies
+      run: |
+        brew install cmake git-lfs
+        git lfs install
+        # Install Rust (required for tokenizers)
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source $HOME/.cargo/env
+        rustc --version
+
+    - name: Clone MLC-LLM source
+      run: |
+        git clone --depth 1 https://github.com/mlc-ai/mlc-llm.git
+        cd mlc-llm
+        git submodule update --init --recursive
+
+    - name: Install MLC-LLM Python package
       run: |
         pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         pip install huggingface_hub
 
-    - name: Download Pre-compiled Qwen3-4B MLC Model
+    - name: Create mlc-package-config.json for Qwen3
       run: |
-        python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./qwen3-4b-mlc')"
-        ls -la ./qwen3-4b-mlc/
+        cd mlc-llm/ios/MLCChat
+        cat > mlc-package-config.json << 'EOF'
+        {
+          "device": "iphone",
+          "model_list": [
+            {
+              "model": "HF://mlc-ai/Qwen3-4B-q4f16_1-MLC",
+              "model_id": "Qwen3-4B-q4f16_1",
+              "estimated_vram_bytes": 3000000000,
+              "overrides": {
+                "prefill_chunk_size": 128,
+                "context_window_size": 2048
+              }
+            }
+          ]
+        }
+        EOF
+        cat mlc-package-config.json
 
-    - name: Apply patch for batch_spec_verify bug
+    - name: Build iOS libraries with mlc_llm package
       run: |
-        SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])")
-        FILE="$SITE_PKG/mlc_llm/op/batch_spec_verify.py"
-        echo "=== Patching $FILE ==="
-        if [ -f "$FILE" ]; then
-          sed -n '50,130p' "$FILE"
-          sed -i '' 's/done\[0\] = False/done[0] = T.bool(False)/g' "$FILE"
-          sed -i '' 's/done\[0\] = True/done[0] = T.bool(True)/g' "$FILE"
-          sed -i '' 's/pred_local\[0\] = False/pred_local[0] = T.bool(False)/g' "$FILE"
-          sed -i '' 's/pred_local\[0\] = True/pred_local[0] = T.bool(True)/g' "$FILE"
-          echo "=== After patch ==="
-          sed -n '50,130p' "$FILE"
-        fi
+        cd mlc-llm/ios/MLCChat
+        export MLC_LLM_SOURCE_DIR=$(cd ../.. && pwd)
+        echo "MLC_LLM_SOURCE_DIR=$MLC_LLM_SOURCE_DIR"
+        # Run the package command
+        python -m mlc_llm package
 
-    - name: Compile for iOS
+    - name: List built artifacts
       run: |
-        mkdir -p ./output
-        python -m mlc_llm compile ./qwen3-4b-mlc/mlc-chat-config.json --device iphone --output ./output/qwen3_q4f16_1-iphone.tar
-        ls -la ./output/
-
-    - name: Extract compiled files
-      run: |
-        cd output
-        tar -xvf qwen3_q4f16_1-iphone.tar || true
-        ls -lh
+        cd mlc-llm/ios/MLCChat
+        echo "=== dist directory ==="
+        ls -laR dist/ || echo "dist not found"
+        echo "=== lib directory ==="
+        ls -la dist/lib/ || echo "lib not found"
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: qwen3-4b-ios-compiled
         path: |
-          output/*.o
-          output/*.tar
-          qwen3-4b-mlc/mlc-chat-config.json
+          mlc-llm/ios/MLCChat/dist/
         retention-days: 30
