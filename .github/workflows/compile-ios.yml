@@ -62,7 +62,7 @@ jobs:
         export DYLD_LIBRARY_PATH=$(pwd)/build/tvm:$(pwd)/build:$DYLD_LIBRARY_PATH
         
         echo "=== Installing TVM-FFI Python package (from source) ==="
-        cd 3rdparty/tvm/3rdparty/tvm-ffi/python
+        cd 3rdparty/tvm/3rdparty/tvm-ffi
         pip install -e .
         cd ../../../..
 
