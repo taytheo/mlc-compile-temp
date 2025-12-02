@@ -83,8 +83,9 @@ jobs:
         # Install without dependencies first to bypass flashinfer check
         pip install --no-deps -e .
         
-        # Manually install required dependencies (excluding flashinfer)
+        # Manually install required runtime dependencies (excluding flashinfer)
         pip install fastapi uvicorn shortuuid prompt_toolkit openai ml_dtypes "torch>=2.0"
+        pip install "apache-tvm-ffi==0.1.4" pandas datasets
         
         cd ..
         
