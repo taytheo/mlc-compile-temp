@@ -21,6 +21,8 @@ jobs:
       run: |
         pip install numpy decorator attrs typing_extensions psutil scipy tornado "huggingface_hub[cli]"
         pip install safetensors transformers torch tqdm sentencepiece tiktoken
+        # Install apache-tvm-ffi from pip (pre-built)
+        pip install apache-tvm-ffi
         
     - name: Clone and Build MLC-LLM
       shell: bash -el {0}
@@ -44,31 +46,23 @@ jobs:
         make -j$(sysctl -n hw.ncpu)
         
         echo "=== Built libraries ==="
-        find . -name "*.dylib" | head -20
-        ls -la lib/*.dylib 2>/dev/null || ls -la *.dylib 2>/dev/null || echo "checking elsewhere"
+        ls -la lib/*.dylib 2>/dev/null || ls -la *.dylib 2>/dev/null
         
     - name: Test MLC-LLM Import
       shell: bash -el {0}
-      env:
-        TVM_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build/lib
       run: |
         cd mlc-llm
         
-        # Add all Python paths
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$PYTHONPATH
+        # Use pip-installed tvm_ffi, but source tvm and mlc_llm
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         export TVM_LIBRARY_PATH=$(pwd)/build/lib
         export DYLD_LIBRARY_PATH=$(pwd)/build/lib:$DYLD_LIBRARY_PATH
         
-        echo "=== Environment ==="
-        echo "TVM_LIBRARY_PATH: $TVM_LIBRARY_PATH"
-        echo "PYTHONPATH: $PYTHONPATH"
-        ls -la $TVM_LIBRARY_PATH/*.dylib 2>/dev/null || echo "No dylib in lib"
-        
-        # Test imports step by step
-        python -c "import sys; print('Python:', sys.executable)"
-        python -c "import tvm_ffi; print('tvm_ffi OK')"
+        echo "=== Testing imports ==="
+        python -c "import tvm_ffi; print('tvm_ffi OK (from pip)')"
         python -c "import tvm; print('tvm OK')"
         python -c "import mlc_llm; print('mlc_llm OK')"
+        python -m mlc_llm --help | head -5
         
     - name: Download Qwen3-4B Model
       shell: bash -el {0}
@@ -81,12 +75,10 @@ jobs:
         
     - name: Generate Config and Compile
       shell: bash -el {0}
-      env:
-        TVM_LIBRARY_PATH: ${{ github.workspace }}/mlc-llm/build/lib
       run: |
         cd mlc-llm
         
-        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$(pwd)/3rdparty/tvm/3rdparty/tvm-ffi/python:$PYTHONPATH
+        export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
         export TVM_LIBRARY_PATH=$(pwd)/build/lib
         export DYLD_LIBRARY_PATH=$(pwd)/build/lib:$DYLD_LIBRARY_PATH
         
