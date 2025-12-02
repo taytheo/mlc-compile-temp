@@ -22,8 +22,8 @@ jobs:
         
     - name: Install MLC-LLM from prebuilt wheel
       run: |
-        # Install prebuilt mlc-llm package (includes tvm runtime)
-        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly mlc-ai-nightly
+        # Install prebuilt mlc-llm package for macOS (CPU version includes Metal support)
+        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         
         # Install additional dependencies
         pip install "huggingface_hub>=0.20.0"
