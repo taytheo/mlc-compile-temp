@@ -21,7 +21,6 @@ jobs:
       run: |
         pip install numpy decorator attrs typing_extensions psutil scipy tornado "huggingface_hub[cli]"
         pip install safetensors transformers torch tqdm sentencepiece tiktoken
-        # Install apache-tvm-ffi from pip (pre-built)
         pip install apache-tvm-ffi
         
     - name: Clone and Build MLC-LLM
@@ -45,21 +44,34 @@ jobs:
         cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         make -j$(sysctl -n hw.ncpu)
         
-        echo "=== Built libraries ==="
-        ls -la lib/*.dylib 2>/dev/null || ls -la *.dylib 2>/dev/null
+        echo "=== Finding all dylib files ==="
+        find . -name "*.dylib" -type f
+        
+        echo "=== Copying libraries to lib/ ==="
+        mkdir -p lib
+        find . -name "libtvm*.dylib" -exec cp {} lib/ \;
+        find . -name "libmlc*.dylib" -exec cp {} lib/ \;
+        ls -la lib/
         
     - name: Test MLC-LLM Import
       shell: bash -el {0}
       run: |
         cd mlc-llm
         
-        # Use pip-installed tvm_ffi, but source tvm and mlc_llm
+        BUILD_DIR=$(pwd)/build
+        
+        # Set library paths - include both lib/ and tvm/ subdirectories
+        export TVM_LIBRARY_PATH=$BUILD_DIR/lib:$BUILD_DIR/tvm:$BUILD_DIR
+        export DYLD_LIBRARY_PATH=$BUILD_DIR/lib:$BUILD_DIR/tvm:$BUILD_DIR:$DYLD_LIBRARY_PATH
         export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
-        export TVM_LIBRARY_PATH=$(pwd)/build/lib
-        export DYLD_LIBRARY_PATH=$(pwd)/build/lib:$DYLD_LIBRARY_PATH
+        
+        echo "=== Library files ==="
+        ls -la $BUILD_DIR/lib/*.dylib 2>/dev/null || echo "No dylib in lib"
+        ls -la $BUILD_DIR/tvm/*.dylib 2>/dev/null || echo "No dylib in tvm"
+        ls -la $BUILD_DIR/*.dylib 2>/dev/null || echo "No dylib in build root"
         
         echo "=== Testing imports ==="
-        python -c "import tvm_ffi; print('tvm_ffi OK (from pip)')"
+        python -c "import tvm_ffi; print('tvm_ffi OK')"
         python -c "import tvm; print('tvm OK')"
         python -c "import mlc_llm; print('mlc_llm OK')"
         python -m mlc_llm --help | head -5
@@ -78,9 +90,10 @@ jobs:
       run: |
         cd mlc-llm
         
+        BUILD_DIR=$(pwd)/build
+        export TVM_LIBRARY_PATH=$BUILD_DIR/lib:$BUILD_DIR/tvm:$BUILD_DIR
+        export DYLD_LIBRARY_PATH=$BUILD_DIR/lib:$BUILD_DIR/tvm:$BUILD_DIR:$DYLD_LIBRARY_PATH
         export PYTHONPATH=$(pwd)/python:$(pwd)/3rdparty/tvm/python:$PYTHONPATH
-        export TVM_LIBRARY_PATH=$(pwd)/build/lib
-        export DYLD_LIBRARY_PATH=$(pwd)/build/lib:$DYLD_LIBRARY_PATH
         
         mkdir -p ../output
         
