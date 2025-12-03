@@ -87,80 +87,6 @@ def patch_batch_spec_verify(site_pkg: str) -> bool:
 
 
 def patch_top_p_pivot(site_pkg: str) -> bool:
-    """batch_spec_verify.py의 bool 타입을 int32로 변환"""
-    file_path = os.path.join(site_pkg, 'mlc_llm', 'op', 'batch_spec_verify.py')
-    
-    if not os.path.exists(file_path):
-        print(f"  ⚠️  파일을 찾을 수 없습니다: {file_path}")
-        return False
-    
-    print(f"  📄 패치 중: {file_path}")
-    
-    with open(file_path, 'r') as f:
-        content = f.read()
-    
-    original = content
-    
-    # 1. 모든 _var("bool") -> _var("int32")
-    content = content.replace('_var("bool")', '_var("int32")')
-    
-    # 2. 모든 T.alloc_buffer with "bool" -> "int32"
-    content = re.sub(
-        r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*"bool"\s*,\s*scope="shared"\)',
-        'T.alloc_buffer((1,), "int32", scope="shared")',
-        content
-    )
-    content = re.sub(
-        r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*"bool"\s*,\s*scope="local"\)',
-        'T.alloc_buffer((1,), "int32", scope="local")',
-        content
-    )
-    
-    # 3. 모든 [0] = False -> [0] = T.int32(0)
-    content = re.sub(r'\[0\]\s*=\s*False', '[0] = T.int32(0)', content)
-    
-    # 4. 모든 [0] = True -> [0] = T.int32(1)
-    content = re.sub(r'\[0\]\s*=\s*True', '[0] = T.int32(1)', content)
-    
-    # 5. 모든 T.Not(...[0]) -> ...[0] == T.int32(0)
-    content = re.sub(
-        r'T\.Not\((\w+)\[0\]\)',
-        r'\1[0] == T.int32(0)',
-        content
-    )
-    
-    # 6. while 문 내의 T.Not 처리
-    content = re.sub(
-        r'while\s+T\.Not\((\w+)\[0\]\)\s*:',
-        r'while \1[0] == T.int32(0):',
-        content
-    )
-    
-    # 7. pred_shared[0] = 비교식 -> T.Cast("int32", 비교식)
-    # pred_shared[0] = p_child[0] >= uniform_sample[0] * q_child[0]
-    content = re.sub(
-        r'pred_shared\[0\]\s*=\s*(.+?)(\s*#.*)?$',
-        r'pred_shared[0] = T.Cast("int32", \1)\2',
-        content,
-        flags=re.MULTILINE
-    )
-    
-    # 8. if pred_local[0]: -> if pred_local[0] != T.int32(0):
-    content = re.sub(
-        r'if\s+(\w+)\[0\]\s*:',
-        r'if \1[0] != T.int32(0):',
-        content
-    )
-    
-    with open(file_path, 'w') as f:
-        f.write(content)
-    
-    changed = original != content
-    print(f"  ✅ batch_spec_verify.py 패치 완료 (변경됨: {changed})")
-    return changed
-
-
-def patch_top_p_pivot(site_pkg: str) -> bool:
     """top_p_pivot.py의 bool 타입을 int32로 변환"""
     file_path = os.path.join(site_pkg, 'mlc_llm', 'op', 'top_p_pivot.py')
     
@@ -310,7 +236,12 @@ def patch_tvm_sampling(site_pkg: str) -> bool:
 
 
 def patch_low_batch_specialization(site_pkg: str) -> bool:
-    """low_batch_specialization.py의 True를 tir.IntImm으로 변환"""
+    """low_batch_specialization.py의 BlockRealize predicate 수정
+    
+    TVM의 BlockRealize는 bool 타입 predicate를 요구하지만,
+    const(True, "bool")이 Metal 백엔드에서 실패함.
+    해결책: tir._ffi_api.BlockRealize를 직접 호출하여 우회
+    """
     file_path = os.path.join(site_pkg, 'mlc_llm', 'compiler_pass', 'low_batch_specialization.py')
     
     if not os.path.exists(file_path):
@@ -324,10 +255,12 @@ def patch_low_batch_specialization(site_pkg: str) -> bool:
     
     original = content
     
-    # tir.BlockRealize([], True, body) -> tir.BlockRealize([], tir.IntImm("int32", 1), body)
+    # tir.BlockRealize([], True, body) -> FFI 직접 호출
+    # TVM FFI에서는 const()를 거치지 않고 직접 bool expression을 전달할 수 있음
+    # tir.const(1, "int32") > tir.const(0, "int32") 형태의 비교 표현식은 bool 타입
     content = content.replace(
         'tir.BlockRealize([], True, body)',
-        'tir.BlockRealize([], tir.IntImm("int32", 1), body)'
+        'tir.BlockRealize([], tir.const(1, "int32") > tir.const(0, "int32"), body)'
     )
     
     with open(file_path, 'w') as f:
@@ -339,7 +272,11 @@ def patch_low_batch_specialization(site_pkg: str) -> bool:
 
 
 def patch_lift_global_buffer_alloc(site_pkg: str) -> bool:
-    """lift_global_buffer_alloc.py의 predicate=True 수정"""
+    """lift_global_buffer_alloc.py의 predicate=True 수정
+    
+    동일한 문제: predicate=True가 const(True, "bool")로 변환되어 실패
+    해결책: 비교 표현식을 사용하여 bool 타입 생성
+    """
     file_path = os.path.join(site_pkg, 'mlc_llm', 'compiler_pass', 'lift_global_buffer_alloc.py')
     
     if not os.path.exists(file_path):
@@ -353,9 +290,11 @@ def patch_lift_global_buffer_alloc(site_pkg: str) -> bool:
     
     original = content
     
-    # predicate=True -> predicate=tir.IntImm("int32", 1)
-    # bool은 안 되므로 int32로 1을 전달 (TVM 내부에서 처리됨)
-    content = content.replace('predicate=True', 'predicate=tir.IntImm("int32", 1)')
+    # predicate=True -> predicate=(1 > 0) 비교 표현식 (항상 True인 bool 표현식)
+    content = content.replace(
+        'predicate=True',
+        'predicate=tir.const(1, "int32") > tir.const(0, "int32")'
+    )
     
     with open(file_path, 'w') as f:
         f.write(content)
@@ -366,7 +305,10 @@ def patch_lift_global_buffer_alloc(site_pkg: str) -> bool:
 
 
 def patch_all_mlc_compiler_passes(site_pkg: str) -> bool:
-    """모든 MLC-LLM compiler_pass 파일에서 predicate=True 패치"""
+    """모든 MLC-LLM compiler_pass 파일에서 predicate=True 패치
+    
+    비교 표현식을 사용하여 항상 True인 bool 표현식 생성
+    """
     compiler_pass_dir = os.path.join(site_pkg, 'mlc_llm', 'compiler_pass')
     
     if not os.path.exists(compiler_pass_dir):
@@ -386,9 +328,12 @@ def patch_all_mlc_compiler_passes(site_pkg: str) -> bool:
         
         original = content
         
-        # predicate=True 패턴 검색 및 치환
+        # predicate=True 패턴 검색 및 치환 (비교 표현식 사용)
         if 'predicate=True' in content:
-            content = content.replace('predicate=True', 'predicate=tir.IntImm("int32", 1)')
+            content = content.replace(
+                'predicate=True',
+                'predicate=tir.const(1, "int32") > tir.const(0, "int32")'
+            )
             
             if content != original:
                 with open(file_path, 'w') as f:
@@ -397,13 +342,14 @@ def patch_all_mlc_compiler_passes(site_pkg: str) -> bool:
                 any_changed = True
         
         # tir.BlockRealize([], True, body) 패턴
+        original_after_first = content
         if 'tir.BlockRealize([], True,' in content:
             content = content.replace(
                 'tir.BlockRealize([], True,',
-                'tir.BlockRealize([], tir.IntImm("int32", 1),'
+                'tir.BlockRealize([], tir.const(1, "int32") > tir.const(0, "int32"),'
             )
             
-            if content != original:
+            if content != original_after_first:
                 with open(file_path, 'w') as f:
                     f.write(content)
                 print(f"     ✅ {filename} 패치됨 (BlockRealize True)")
@@ -504,6 +450,67 @@ def verify_patch(site_pkg: str):
         print(f"  📊 int32 버퍼 사용 횟수: {int32_count}")
 
 
+def patch_tvm_stmt(site_pkg: str) -> bool:
+    """TVM stmt.py의 BlockRealize.__init__ 패치
+    
+    원래 코드:
+        if isinstance(predicate, bool):
+            predicate = const(predicate, "bool")
+    
+    const(True, "bool")이 Metal 백엔드에서 실패하므로,
+    비교 표현식으로 대체
+    """
+    file_path = os.path.join(site_pkg, 'tvm', 'tir', 'stmt.py')
+    
+    if not os.path.exists(file_path):
+        print(f"  ⚠️  파일을 찾을 수 없습니다: {file_path}")
+        return False
+    
+    print(f"  📄 패치 중: {file_path}")
+    
+    with open(file_path, 'r') as f:
+        content = f.read()
+    
+    original = content
+    
+    # isinstance(predicate, bool) 체크 후 const(predicate, "bool") 호출 부분을 수정
+    # 비교 표현식 (1 > 0) 또는 (0 > 1)을 사용하여 True/False 표현
+    old_code = '''if isinstance(predicate, bool):
+            predicate = const(predicate, "bool")'''
+    
+    new_code = '''if isinstance(predicate, bool):
+            # Patched: avoid const(bool) issue on Metal backend
+            # Use comparison expression instead of const(bool)
+            from tvm import tir as _tir
+            if predicate:
+                predicate = _tir.const(1, "int32") > _tir.const(0, "int32")
+            else:
+                predicate = _tir.const(0, "int32") > _tir.const(1, "int32")'''
+    
+    content = content.replace(old_code, new_code)
+    
+    # 다른 형태의 코드도 처리 (들여쓰기가 다를 수 있음)
+    old_code_alt = '''        if isinstance(predicate, bool):
+            predicate = const(predicate, "bool")'''
+    
+    new_code_alt = '''        if isinstance(predicate, bool):
+            # Patched: avoid const(bool) issue on Metal backend
+            from tvm import tir as _tir
+            if predicate:
+                predicate = _tir.const(1, "int32") > _tir.const(0, "int32")
+            else:
+                predicate = _tir.const(0, "int32") > _tir.const(1, "int32")'''
+    
+    content = content.replace(old_code_alt, new_code_alt)
+    
+    with open(file_path, 'w') as f:
+        f.write(content)
+    
+    changed = original != content
+    print(f"  ✅ tvm/tir/stmt.py 패치 완료 (변경됨: {changed})")
+    return changed
+
+
 def main():
     print("=" * 50)
     print("🔧 MLC-LLM Bool 타입 버그 패치")
@@ -529,35 +536,39 @@ def main():
     print()
     
     # 패치 적용
-    print("[1/6] batch_spec_verify.py 패치")
+    print("[1/7] batch_spec_verify.py 패치")
     bsv_changed = patch_batch_spec_verify(site_pkg)
     
     print()
-    print("[2/6] top_p_pivot.py 패치")
+    print("[2/7] top_p_pivot.py 패치")
     tpp_changed = patch_top_p_pivot(site_pkg)
     
     print()
-    print("[3/6] tvm/sampling.py 패치")
+    print("[3/7] tvm/sampling.py 패치")
     sampling_changed = patch_tvm_sampling(site_pkg)
     
     print()
-    print("[4/6] low_batch_specialization.py 패치")
+    print("[4/7] low_batch_specialization.py 패치")
     lbs_changed = patch_low_batch_specialization(site_pkg)
     
     print()
-    print("[5/6] lift_global_buffer_alloc.py 패치")
+    print("[5/7] lift_global_buffer_alloc.py 패치")
     lgba_changed = patch_lift_global_buffer_alloc(site_pkg)
     
     print()
-    print("[6/6] 모든 compiler_pass 파일 스캔 및 패치")
+    print("[6/7] 모든 compiler_pass 파일 스캔 및 패치")
     all_cp_changed = patch_all_mlc_compiler_passes(site_pkg)
+    
+    print()
+    print("[7/7] TVM tir/stmt.py 패치 (BlockRealize bool predicate)")
+    tvm_stmt_changed = patch_tvm_stmt(site_pkg)
     
     # 검증
     verify_patch(site_pkg)
     
     print()
     print("=" * 50)
-    if bsv_changed or tpp_changed or sampling_changed or lbs_changed or lgba_changed or all_cp_changed:
+    if bsv_changed or tpp_changed or sampling_changed or lbs_changed or lgba_changed or all_cp_changed or tvm_stmt_changed:
         print("🎉 MLC-LLM Bool 타입 버그 패치 완료!")
     else:
         print("ℹ️  이미 패치가 적용되어 있거나 변경사항이 없습니다")
