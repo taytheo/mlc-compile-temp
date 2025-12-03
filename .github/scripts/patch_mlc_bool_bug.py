@@ -324,19 +324,11 @@ def patch_low_batch_specialization(site_pkg: str) -> bool:
     
     original = content
     
-    # tir.BlockRealize([], True, body) -> tir.BlockRealize([], T.bool(True), body)
-    # T.bool(True)는 tir.Cast를 통해 만들어짐
+    # tir.BlockRealize([], True, body) -> tir.BlockRealize([], tir.IntImm("int32", 1), body)
     content = content.replace(
         'tir.BlockRealize([], True, body)',
-        'tir.BlockRealize([], T.bool(True), body)'
+        'tir.BlockRealize([], tir.IntImm("int32", 1), body)'
     )
-    
-    # T 임포트 추가 (없으면)
-    if 'from tvm.script import tir as T' not in content:
-        content = content.replace(
-            'from tvm import tir',
-            'from tvm import tir\nfrom tvm.script import tir as T'
-        )
     
     with open(file_path, 'w') as f:
         f.write(content)
@@ -361,15 +353,9 @@ def patch_lift_global_buffer_alloc(site_pkg: str) -> bool:
     
     original = content
     
-    # predicate=True -> predicate=T.bool(True)
-    content = content.replace('predicate=True', 'predicate=T.bool(True)')
-    
-    # T 임포트 추가 (없으면)
-    if 'from tvm.script import tir as T' not in content:
-        content = content.replace(
-            'from tvm import tir',
-            'from tvm import tir\nfrom tvm.script import tir as T'
-        )
+    # predicate=True -> predicate=tir.IntImm("int32", 1)
+    # bool은 안 되므로 int32로 1을 전달 (TVM 내부에서 처리됨)
+    content = content.replace('predicate=True', 'predicate=tir.IntImm("int32", 1)')
     
     with open(file_path, 'w') as f:
         f.write(content)
@@ -401,28 +387,26 @@ def patch_all_mlc_compiler_passes(site_pkg: str) -> bool:
         original = content
         
         # predicate=True 패턴 검색 및 치환
-        if 'predicate=True' in content or 'tir.BlockRealize([], True' in content:
-            content = content.replace('predicate=True', 'predicate=T.bool(True)')
-            content = content.replace('tir.BlockRealize([], True,', 'tir.BlockRealize([], T.bool(True),')
-            
-            # T 임포트 추가 (없으면)
-            if 'from tvm.script import tir as T' not in content:
-                if 'from tvm import tir' in content:
-                    content = content.replace(
-                        'from tvm import tir',
-                        'from tvm import tir\nfrom tvm.script import tir as T'
-                    )
-                elif 'import tvm' in content:
-                    # import tvm 뒤에 추가
-                    content = content.replace(
-                        'import tvm\n',
-                        'import tvm\nfrom tvm.script import tir as T\n'
-                    )
+        if 'predicate=True' in content:
+            content = content.replace('predicate=True', 'predicate=tir.IntImm("int32", 1)')
             
             if content != original:
                 with open(file_path, 'w') as f:
                     f.write(content)
-                print(f"     ✅ {filename} 패치됨")
+                print(f"     ✅ {filename} 패치됨 (predicate=True)")
+                any_changed = True
+        
+        # tir.BlockRealize([], True, body) 패턴
+        if 'tir.BlockRealize([], True,' in content:
+            content = content.replace(
+                'tir.BlockRealize([], True,',
+                'tir.BlockRealize([], tir.IntImm("int32", 1),'
+            )
+            
+            if content != original:
+                with open(file_path, 'w') as f:
+                    f.write(content)
+                print(f"     ✅ {filename} 패치됨 (BlockRealize True)")
                 any_changed = True
     
     return any_changed
