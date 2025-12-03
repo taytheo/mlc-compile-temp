@@ -28,21 +28,28 @@ jobs:
           pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
           pip install huggingface_hub
 
-      - name: Login to HuggingFace
-        run: |
-          echo "🔐 Logging in to HuggingFace..."
-          huggingface-cli login --token ${{ secrets.HF_TOKEN }}
-
       - name: Patch MLC-LLM bool type bug
         run: |
           echo "🔧 MLC-LLM Bool 타입 버그 패치 시작 (GitHub Issue #3389)"
           python3 .github/scripts/patch_mlc_bool_bug.py
 
       - name: Download original HuggingFace model
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           mkdir -p model_weights
           echo "📥 Downloading original Qwen3-4B from HuggingFace..."
-          python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-4B', local_dir='./model_weights/Qwen3-4B', ignore_patterns=['*.bin', '*.safetensors'])"
+          python3 << 'EOF'
+          import os
+          from huggingface_hub import snapshot_download
+          token = os.environ.get('HF_TOKEN')
+          snapshot_download(
+              repo_id='Qwen/Qwen3-4B',
+              local_dir='./model_weights/Qwen3-4B',
+              ignore_patterns=['*.bin', '*.safetensors'],
+              token=token
+          )
+          EOF
           echo "=== Downloaded files ==="
           ls -la ./model_weights/Qwen3-4B/
 
