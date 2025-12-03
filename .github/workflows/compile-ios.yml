@@ -15,8 +15,6 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
 
     - name: Setup Conda
       uses: conda-incubator/setup-miniconda@v3
@@ -30,20 +28,17 @@ jobs:
         pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
         pip install huggingface_hub
 
-    - name: Patch batch_spec_verify.py
-      run: python3 .github/scripts/patch_batch_spec.py
-    
-    - name: Patch attach_sampler.py  # ← 이 스텝 추가!
-      run: python3 .github/scripts/patch_attach_sampler.py
-    
-    - name: Apply comprehensive patch
-      run: python3 .github/scripts/patch_comprehensive.py
+    - name: Patch MLC-LLM bool type bug
+      run: |
+        echo "🔧 MLC-LLM Bool 타입 버그 패치 시작 (GitHub Issue #3389)"
+        python3 .github/scripts/patch_mlc_bool_bug.py
 
     - name: Download model and create custom config
       run: |
         mkdir -p model_weights
         python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
-        python3 .github/scripts/update_config.py
+        cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
+        python3 .github/scripts/update_mlc_config.py
 
     - name: Compile for iOS
       run: |
