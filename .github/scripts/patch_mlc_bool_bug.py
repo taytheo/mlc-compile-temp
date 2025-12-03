@@ -62,6 +62,22 @@ def patch_batch_spec_verify(site_pkg: str) -> bool:
         content
     )
     
+    # 7. pred_shared[0] = 비교식 -> T.Cast("int32", 비교식)
+    # pred_shared[0] = p_child[0] >= uniform_sample[0] * q_child[0]
+    content = re.sub(
+        r'pred_shared\[0\]\s*=\s*(.+?)(\s*#.*)?$',
+        r'pred_shared[0] = T.Cast("int32", \1)\2',
+        content,
+        flags=re.MULTILINE
+    )
+    
+    # 8. if pred_local[0]: -> if pred_local[0] != T.int32(0):
+    content = re.sub(
+        r'if\s+(\w+)\[0\]\s*:',
+        r'if \1[0] != T.int32(0):',
+        content
+    )
+    
     with open(file_path, 'w') as f:
         f.write(content)
     
@@ -142,11 +158,39 @@ def verify_patch(site_pkg: str):
         print("\n--- batch_spec_verify.py 검증 ---")
         if '"bool"' in content:
             print("  ❌ 아직 bool 타입이 남아있습니다!")
+            # 어디에 남아있는지 출력
+            for i, line in enumerate(content.split('\n'), 1):
+                if '"bool"' in line:
+                    print(f"     Line {i}: {line.strip()}")
         else:
             print("  ✅ bool 타입이 모두 제거되었습니다")
         
+        # T.Not 체크
+        if 'T.Not(' in content:
+            print("  ❌ T.Not()가 남아있습니다!")
+            for i, line in enumerate(content.split('\n'), 1):
+                if 'T.Not(' in line:
+                    print(f"     Line {i}: {line.strip()}")
+        else:
+            print("  ✅ T.Not()가 모두 제거되었습니다")
+        
         int32_count = content.count('int32')
         print(f"  📊 int32 사용 횟수: {int32_count}")
+        
+        # 핵심 패치 확인
+        print("\n  🔍 핵심 패치 확인:")
+        checks = [
+            ('_var("int32")', 'done = _var("int32")'),
+            ('T.alloc_buffer((1,), "int32"', 'pred_shared/pred_local 버퍼'),
+            ('T.Cast("int32"', 'pred_shared 비교 결과 캐스팅'),
+            ('!= T.int32(0)', 'if pred_local[0] 조건'),
+            ('== T.int32(0)', 'while done[0] 조건'),
+        ]
+        for pattern, desc in checks:
+            if pattern in content:
+                print(f"     ✅ {desc}")
+            else:
+                print(f"     ❌ {desc} - 패턴 없음: {pattern}")
     
     # top_p_pivot.py 검증
     tpp_path = os.path.join(site_pkg, 'mlc_llm', 'op', 'top_p_pivot.py')
@@ -157,8 +201,19 @@ def verify_patch(site_pkg: str):
         print("\n--- top_p_pivot.py 검증 ---")
         if '"bool"' in content:
             print("  ❌ 아직 bool 타입이 남아있습니다!")
+            for i, line in enumerate(content.split('\n'), 1):
+                if '"bool"' in line:
+                    print(f"     Line {i}: {line.strip()}")
         else:
             print("  ✅ bool 타입이 모두 제거되었습니다")
+        
+        if 'T.Not(' in content:
+            print("  ❌ T.Not()가 남아있습니다!")
+            for i, line in enumerate(content.split('\n'), 1):
+                if 'T.Not(' in line:
+                    print(f"     Line {i}: {line.strip()}")
+        else:
+            print("  ✅ T.Not()가 모두 제거되었습니다")
         
         int32_count = content.count('int32')
         print(f"  📊 int32 사용 횟수: {int32_count}")
