@@ -309,6 +309,35 @@ def patch_tvm_sampling(site_pkg: str) -> bool:
     return changed
 
 
+def patch_low_batch_specialization(site_pkg: str) -> bool:
+    """low_batch_specialization.py의 True를 tir.IntImm으로 변환"""
+    file_path = os.path.join(site_pkg, 'mlc_llm', 'compiler_pass', 'low_batch_specialization.py')
+    
+    if not os.path.exists(file_path):
+        print(f"  ⚠️  파일을 찾을 수 없습니다: {file_path}")
+        return False
+    
+    print(f"  📄 패치 중: {file_path}")
+    
+    with open(file_path, 'r') as f:
+        content = f.read()
+    
+    original = content
+    
+    # tir.BlockRealize([], True, body) -> tir.BlockRealize([], tir.IntImm("bool", 1), body)
+    content = content.replace(
+        'tir.BlockRealize([], True, body)',
+        'tir.BlockRealize([], tir.IntImm("bool", 1), body)'
+    )
+    
+    with open(file_path, 'w') as f:
+        f.write(content)
+    
+    changed = original != content
+    print(f"  ✅ low_batch_specialization.py 패치 완료 (변경됨: {changed})")
+    return changed
+
+
 def verify_patch(site_pkg: str):
     """패치가 제대로 적용되었는지 검증"""
     print("\n📋 패치 검증...")
@@ -426,23 +455,27 @@ def main():
     print()
     
     # 패치 적용
-    print("[1/3] batch_spec_verify.py 패치")
+    print("[1/4] batch_spec_verify.py 패치")
     bsv_changed = patch_batch_spec_verify(site_pkg)
     
     print()
-    print("[2/3] top_p_pivot.py 패치")
+    print("[2/4] top_p_pivot.py 패치")
     tpp_changed = patch_top_p_pivot(site_pkg)
     
     print()
-    print("[3/3] tvm/sampling.py 패치")
+    print("[3/4] tvm/sampling.py 패치")
     sampling_changed = patch_tvm_sampling(site_pkg)
+    
+    print()
+    print("[4/4] low_batch_specialization.py 패치")
+    lbs_changed = patch_low_batch_specialization(site_pkg)
     
     # 검증
     verify_patch(site_pkg)
     
     print()
     print("=" * 50)
-    if bsv_changed or tpp_changed or sampling_changed:
+    if bsv_changed or tpp_changed or sampling_changed or lbs_changed:
         print("🎉 MLC-LLM Bool 타입 버그 패치 완료!")
     else:
         print("ℹ️  이미 패치가 적용되어 있거나 변경사항이 없습니다")
