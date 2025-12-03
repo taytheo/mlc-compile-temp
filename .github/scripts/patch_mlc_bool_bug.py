@@ -324,11 +324,19 @@ def patch_low_batch_specialization(site_pkg: str) -> bool:
     
     original = content
     
-    # tir.BlockRealize([], True, body) -> tir.BlockRealize([], tir.IntImm("bool", 1), body)
+    # tir.BlockRealize([], True, body) -> tir.BlockRealize([], T.bool(True), body)
+    # T.bool(True)는 tir.Cast를 통해 만들어짐
     content = content.replace(
         'tir.BlockRealize([], True, body)',
-        'tir.BlockRealize([], tir.IntImm("bool", 1), body)'
+        'tir.BlockRealize([], T.bool(True), body)'
     )
+    
+    # T 임포트 추가 (없으면)
+    if 'from tvm.script import tir as T' not in content:
+        content = content.replace(
+            'from tvm import tir',
+            'from tvm import tir\nfrom tvm.script import tir as T'
+        )
     
     with open(file_path, 'w') as f:
         f.write(content)
