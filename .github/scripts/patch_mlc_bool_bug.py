@@ -346,6 +346,88 @@ def patch_low_batch_specialization(site_pkg: str) -> bool:
     return changed
 
 
+def patch_lift_global_buffer_alloc(site_pkg: str) -> bool:
+    """lift_global_buffer_alloc.py의 predicate=True 수정"""
+    file_path = os.path.join(site_pkg, 'mlc_llm', 'compiler_pass', 'lift_global_buffer_alloc.py')
+    
+    if not os.path.exists(file_path):
+        print(f"  ⚠️  파일을 찾을 수 없습니다: {file_path}")
+        return False
+    
+    print(f"  📄 패치 중: {file_path}")
+    
+    with open(file_path, 'r') as f:
+        content = f.read()
+    
+    original = content
+    
+    # predicate=True -> predicate=T.bool(True)
+    content = content.replace('predicate=True', 'predicate=T.bool(True)')
+    
+    # T 임포트 추가 (없으면)
+    if 'from tvm.script import tir as T' not in content:
+        content = content.replace(
+            'from tvm import tir',
+            'from tvm import tir\nfrom tvm.script import tir as T'
+        )
+    
+    with open(file_path, 'w') as f:
+        f.write(content)
+    
+    changed = original != content
+    print(f"  ✅ lift_global_buffer_alloc.py 패치 완료 (변경됨: {changed})")
+    return changed
+
+
+def patch_all_mlc_compiler_passes(site_pkg: str) -> bool:
+    """모든 MLC-LLM compiler_pass 파일에서 predicate=True 패치"""
+    compiler_pass_dir = os.path.join(site_pkg, 'mlc_llm', 'compiler_pass')
+    
+    if not os.path.exists(compiler_pass_dir):
+        print(f"  ⚠️  디렉토리를 찾을 수 없습니다: {compiler_pass_dir}")
+        return False
+    
+    print(f"  📁 compiler_pass 디렉토리 스캔 중: {compiler_pass_dir}")
+    
+    any_changed = False
+    for filename in os.listdir(compiler_pass_dir):
+        if not filename.endswith('.py'):
+            continue
+        
+        file_path = os.path.join(compiler_pass_dir, filename)
+        with open(file_path, 'r') as f:
+            content = f.read()
+        
+        original = content
+        
+        # predicate=True 패턴 검색 및 치환
+        if 'predicate=True' in content or 'tir.BlockRealize([], True' in content:
+            content = content.replace('predicate=True', 'predicate=T.bool(True)')
+            content = content.replace('tir.BlockRealize([], True,', 'tir.BlockRealize([], T.bool(True),')
+            
+            # T 임포트 추가 (없으면)
+            if 'from tvm.script import tir as T' not in content:
+                if 'from tvm import tir' in content:
+                    content = content.replace(
+                        'from tvm import tir',
+                        'from tvm import tir\nfrom tvm.script import tir as T'
+                    )
+                elif 'import tvm' in content:
+                    # import tvm 뒤에 추가
+                    content = content.replace(
+                        'import tvm\n',
+                        'import tvm\nfrom tvm.script import tir as T\n'
+                    )
+            
+            if content != original:
+                with open(file_path, 'w') as f:
+                    f.write(content)
+                print(f"     ✅ {filename} 패치됨")
+                any_changed = True
+    
+    return any_changed
+
+
 def verify_patch(site_pkg: str):
     """패치가 제대로 적용되었는지 검증"""
     print("\n📋 패치 검증...")
@@ -463,27 +545,35 @@ def main():
     print()
     
     # 패치 적용
-    print("[1/4] batch_spec_verify.py 패치")
+    print("[1/6] batch_spec_verify.py 패치")
     bsv_changed = patch_batch_spec_verify(site_pkg)
     
     print()
-    print("[2/4] top_p_pivot.py 패치")
+    print("[2/6] top_p_pivot.py 패치")
     tpp_changed = patch_top_p_pivot(site_pkg)
     
     print()
-    print("[3/4] tvm/sampling.py 패치")
+    print("[3/6] tvm/sampling.py 패치")
     sampling_changed = patch_tvm_sampling(site_pkg)
     
     print()
-    print("[4/4] low_batch_specialization.py 패치")
+    print("[4/6] low_batch_specialization.py 패치")
     lbs_changed = patch_low_batch_specialization(site_pkg)
+    
+    print()
+    print("[5/6] lift_global_buffer_alloc.py 패치")
+    lgba_changed = patch_lift_global_buffer_alloc(site_pkg)
+    
+    print()
+    print("[6/6] 모든 compiler_pass 파일 스캔 및 패치")
+    all_cp_changed = patch_all_mlc_compiler_passes(site_pkg)
     
     # 검증
     verify_patch(site_pkg)
     
     print()
     print("=" * 50)
-    if bsv_changed or tpp_changed or sampling_changed or lbs_changed:
+    if bsv_changed or tpp_changed or sampling_changed or lbs_changed or lgba_changed or all_cp_changed:
         print("🎉 MLC-LLM Bool 타입 버그 패치 완료!")
     else:
         print("ℹ️  이미 패치가 적용되어 있거나 변경사항이 없습니다")
