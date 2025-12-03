@@ -275,13 +275,17 @@ def patch_tvm_sampling(site_pkg: str) -> bool:
         content
     )
     
-    # 6. greater_than_u[v] = (...) -> T.Cast("int32", ...)
-    content = re.sub(
-        r'greater_than_u\[v\]\s*=\s*\(',
-        'greater_than_u[v] = T.Cast("int32", (',
-        content
-    )
-    # 닫는 괄호 추가가 필요할 수 있음 - 복잡한 표현식이므로 수동 확인 필요
+    # 6. greater_than_u[v] = (...) 여러 줄 표현식 처리
+    # 직접 문자열 치환으로 처리
+    old_greater = '''greater_than_u[v] = (
+                        cumsum[ty * warp_elem + tx * thread_elem + v] + aggregate[()]
+                        >= uniform_sample - eps
+                    )'''
+    new_greater = '''greater_than_u[v] = T.Cast("int32",
+                        cumsum[ty * warp_elem + tx * thread_elem + v] + aggregate[()]
+                        >= uniform_sample - eps
+                    )'''
+    content = content.replace(old_greater, new_greater)
     
     # 7. mask[v] = mask[v] and valid[v] -> T.Cast("int32", ...)
     content = re.sub(
