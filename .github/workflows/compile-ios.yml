@@ -44,9 +44,12 @@ jobs:
         run: |
           echo "⚙️ Generating optimized config for iPhone (low memory)..."
           # gen_config으로 prefill_chunk_size와 context_window_size 적용
+          # Qwen3는 qwen2 conv-template 사용
           python -m mlc_llm gen_config \
-            ./model_weights/Qwen3-4B-q4f16_1-MLC \
+            ./model_weights/Qwen3-4B-q4f16_1-MLC/config.json \
             --quantization q4f16_1 \
+            --model-type qwen3 \
+            --conv-template qwen2 \
             --prefill-chunk-size 32 \
             --context-window-size 1024 \
             --max-batch-size 1 \
