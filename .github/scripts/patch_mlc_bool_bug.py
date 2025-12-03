@@ -27,33 +27,38 @@ def patch_batch_spec_verify(site_pkg: str) -> bool:
     
     original = content
     
-    # 1. _var("bool") -> _var("int32")
-    content = content.replace('done = _var("bool")', 'done = _var("int32")')
+    # 1. 모든 _var("bool") -> _var("int32")
+    content = content.replace('_var("bool")', '_var("int32")')
     
-    # 2. T.alloc_buffer((1,), "bool", scope="shared") -> int32
+    # 2. 모든 T.alloc_buffer with "bool" -> "int32"
     content = re.sub(
         r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*"bool"\s*,\s*scope="shared"\)',
         'T.alloc_buffer((1,), "int32", scope="shared")',
         content
     )
-    
-    # 3. T.alloc_buffer((1,), "bool", scope="local") -> int32
     content = re.sub(
         r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*"bool"\s*,\s*scope="local"\)',
         'T.alloc_buffer((1,), "int32", scope="local")',
         content
     )
     
-    # 4. done[0] = False -> done[0] = T.int32(0)
-    content = content.replace('done[0] = False', 'done[0] = T.int32(0)')
+    # 3. 모든 [0] = False -> [0] = T.int32(0)
+    content = re.sub(r'\[0\]\s*=\s*False', '[0] = T.int32(0)', content)
     
-    # 5. done[0] = True -> done[0] = T.int32(1)
-    content = content.replace('done[0] = True', 'done[0] = T.int32(1)')
+    # 4. 모든 [0] = True -> [0] = T.int32(1)
+    content = re.sub(r'\[0\]\s*=\s*True', '[0] = T.int32(1)', content)
     
-    # 6. while T.Not(done[0]): -> while done[0] == T.int32(0):
+    # 5. 모든 T.Not(...[0]) -> ...[0] == T.int32(0)
     content = re.sub(
-        r'while\s+T\.Not\(done\[0\]\)\s*:',
-        'while done[0] == T.int32(0):',
+        r'T\.Not\((\w+)\[0\]\)',
+        r'\1[0] == T.int32(0)',
+        content
+    )
+    
+    # 6. while 문 내의 T.Not 처리
+    content = re.sub(
+        r'while\s+T\.Not\((\w+)\[0\]\)\s*:',
+        r'while \1[0] == T.int32(0):',
         content
     )
     
@@ -80,45 +85,40 @@ def patch_top_p_pivot(site_pkg: str) -> bool:
     
     original = content
     
-    # 1. _var("bool") -> _var("int32")
-    content = content.replace('es_local = _var("bool")', 'es_local = _var("int32")')
-    content = content.replace('find_pivot_local = _var("bool")', 'find_pivot_local = _var("int32")')
+    # 1. 모든 _var("bool") -> _var("int32")
+    content = content.replace('_var("bool")', '_var("int32")')
     
-    # 2. T.alloc_buffer((1,), "bool", scope="shared") -> int32
-    content = content.replace(
-        'es = T.alloc_buffer((1,), "bool", scope="shared")',
-        'es = T.alloc_buffer((1,), "int32", scope="shared")'
+    # 2. 모든 T.alloc_buffer with "bool" -> "int32"
+    content = re.sub(
+        r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*"bool"\s*,\s*scope="shared"\)',
+        'T.alloc_buffer((1,), "int32", scope="shared")',
+        content
     )
-    content = content.replace(
-        'find_pivot = T.alloc_buffer((1,), "bool", scope="shared")',
-        'find_pivot = T.alloc_buffer((1,), "int32", scope="shared")'
+    content = re.sub(
+        r'T\.alloc_buffer\(\s*\(\s*1\s*,\s*\)\s*,\s*"bool"\s*,\s*scope="local"\)',
+        'T.alloc_buffer((1,), "int32", scope="local")',
+        content
     )
     
-    # 3. find_pivot[0] = False -> find_pivot[0] = T.int32(0)
-    content = content.replace('find_pivot[0] = False', 'find_pivot[0] = T.int32(0)')
+    # 3. 모든 [0] = False -> [0] = T.int32(0)
+    content = re.sub(r'\[0\]\s*=\s*False', '[0] = T.int32(0)', content)
     
-    # 4. find_pivot[0] = True -> find_pivot[0] = T.int32(1)
-    content = content.replace('find_pivot[0] = True', 'find_pivot[0] = T.int32(1)')
+    # 4. 모든 [0] = True -> [0] = T.int32(1)
+    content = re.sub(r'\[0\]\s*=\s*True', '[0] = T.int32(1)', content)
     
-    # 5. find_pivot_local[0] = False -> find_pivot_local[0] = T.int32(0)
-    content = content.replace('find_pivot_local[0] = False', 'find_pivot_local[0] = T.int32(0)')
+    # 5. 모든 T.Not(...[0]) -> ...[0] == T.int32(0)
+    content = re.sub(
+        r'T\.Not\((\w+)\[0\]\)',
+        r'\1[0] == T.int32(0)',
+        content
+    )
     
-    # 6. find_pivot_local[0] = True -> find_pivot_local[0] = T.int32(1)
-    content = content.replace('find_pivot_local[0] = True', 'find_pivot_local[0] = T.int32(1)')
-    
-    # 7. es_local[0] = False -> es_local[0] = T.int32(0)
-    content = content.replace('es_local[0] = False', 'es_local[0] = T.int32(0)')
-    
-    # 8. T.Not(find_pivot_local[0]) -> find_pivot_local[0] == T.int32(0)
-    content = content.replace('T.Not(find_pivot_local[0])', 'find_pivot_local[0] == T.int32(0)')
-    
-    # 9. T.Not(es_local[0]) -> es_local[0] == T.int32(0)
-    content = content.replace('T.Not(es_local[0])', 'es_local[0] == T.int32(0)')
-    
-    # 10. es[0] = 1 - total_sum_reduce[0] < pivot[pN - 1] -> T.Cast("int32", ...)
-    content = content.replace(
-        'es[0] = 1 - total_sum_reduce[0] < pivot[pN - 1]',
-        'es[0] = T.Cast("int32", 1 - total_sum_reduce[0] < pivot[pN - 1])'
+    # 6. bool 비교 결과를 int32로 캐스팅
+    # es[0] = 1 - total_sum_reduce[0] < pivot[pN - 1] -> T.Cast("int32", ...)
+    content = re.sub(
+        r'es\[0\]\s*=\s*1\s*-\s*total_sum_reduce\[0\]\s*<\s*pivot\[pN\s*-\s*1\]',
+        'es[0] = T.Cast("int32", 1 - total_sum_reduce[0] < pivot[pN - 1])',
+        content
     )
     
     with open(file_path, 'w') as f:
