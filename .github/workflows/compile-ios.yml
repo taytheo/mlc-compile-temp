@@ -28,6 +28,11 @@ jobs:
           pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
           pip install huggingface_hub
 
+      - name: Login to HuggingFace
+        run: |
+          echo "🔐 Logging in to HuggingFace..."
+          huggingface-cli login --token ${{ secrets.HF_TOKEN }}
+
       - name: Patch MLC-LLM bool type bug
         run: |
           echo "🔧 MLC-LLM Bool 타입 버그 패치 시작 (GitHub Issue #3389)"
@@ -36,16 +41,16 @@ jobs:
       - name: Download original HuggingFace model
         run: |
           mkdir -p model_weights
-          echo "📥 Downloading original Qwen3-4B-Instruct from HuggingFace..."
-          python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-4B-Instruct', local_dir='./model_weights/Qwen3-4B-Instruct', ignore_patterns=['*.bin', '*.safetensors'])"
+          echo "📥 Downloading original Qwen3-4B from HuggingFace..."
+          python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-4B', local_dir='./model_weights/Qwen3-4B', ignore_patterns=['*.bin', '*.safetensors'])"
           echo "=== Downloaded files ==="
-          ls -la ./model_weights/Qwen3-4B-Instruct/
+          ls -la ./model_weights/Qwen3-4B/
 
       - name: Generate optimized config for iPhone
         run: |
           echo "⚙️ Generating config with low memory settings..."
           python -m mlc_llm gen_config \
-            ./model_weights/Qwen3-4B-Instruct \
+            ./model_weights/Qwen3-4B \
             --quantization q4f16_1 \
             --model-type qwen3 \
             --conv-template qwen2 \
