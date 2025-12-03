@@ -38,25 +38,37 @@ jobs:
           mkdir -p model_weights
           echo "📥 Downloading Qwen3-4B model weights..."
           python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
-          cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
 
-      - name: Generate optimized config for iPhone
+      - name: Modify config for iPhone low memory
         run: |
-          echo "⚙️ Generating optimized config for iPhone (low memory)..."
-          # gen_config으로 prefill_chunk_size와 context_window_size 적용
-          # Qwen3는 qwen2 conv-template 사용
-          python -m mlc_llm gen_config \
-            ./model_weights/Qwen3-4B-q4f16_1-MLC/config.json \
-            --quantization q4f16_1 \
-            --model-type qwen3 \
-            --conv-template qwen2 \
-            --prefill-chunk-size 32 \
-            --context-window-size 1024 \
-            --max-batch-size 1 \
-            --output ./model_weights/Qwen3-4B-q4f16_1-MLC \
-            2>&1 | tee gen_config_log.txt
-          echo "=== Generated config ==="
-          cat ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json
+          echo "⚙️ Modifying mlc-chat-config.json for iPhone (low memory)..."
+          cd ./model_weights/Qwen3-4B-q4f16_1-MLC
+          # 원본 백업
+          cp mlc-chat-config.json mlc-chat-config.json.bak
+          # Python으로 config 수정
+          python3 << 'EOF'
+          import json
+          
+          with open('mlc-chat-config.json', 'r') as f:
+              config = json.load(f)
+          
+          # 메모리 최적화 설정
+          config['prefill_chunk_size'] = 32
+          config['context_window_size'] = 1024
+          
+          if 'model_config' in config:
+              config['model_config']['prefill_chunk_size'] = 32
+              config['model_config']['context_window_size'] = 1024
+              config['model_config']['max_batch_size'] = 1
+          
+          with open('mlc-chat-config.json', 'w') as f:
+              json.dump(config, f, indent=2)
+          
+          print("✅ Config updated:")
+          print(f"   prefill_chunk_size: {config['prefill_chunk_size']}")
+          print(f"   context_window_size: {config['context_window_size']}")
+          EOF
+          cat mlc-chat-config.json
 
       - name: Compile for iOS
         run: |
@@ -88,7 +100,7 @@ jobs:
             output/*.o
             output/*.tar
             model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json
+            model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
             compile_log.txt
-            gen_config_log.txt
           retention-days: 30
           if-no-files-found: warn
