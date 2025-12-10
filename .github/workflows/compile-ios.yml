@@ -2,6 +2,19 @@ name: Compile MLC-LLM (CPU-only, iOS/MMAP + shards)
 
 on:
   workflow_dispatch:
+    inputs:
+      force_convert:
+        description: 'Force running mlc_llm convert_weight even if params_shard_*.bin already exists in the model repo (true/false)'
+        required: false
+        default: 'false'
+      require_shards:
+        description: 'Require params_shard_*.bin in the compile output; if false, do not fail the build when missing (true/false)'
+        required: false
+        default: 'true'
+      reject_gpu_kernels:
+        description: 'Fail the workflow if lib0.o contains GPU/Metal-specific kernels (true/false)'
+        required: false
+        default: 'true'
 
 jobs:
   cpu-only-compile-ios:
@@ -45,8 +58,8 @@ jobs:
 
         # If no params_shard_* present, attempt to convert downloaded HF weights to MLC format
         shards=$(find model_weights/Qwen3-4B-q4f16_1-MLC -type f -name "params_shard_*.bin" | wc -l || true)
-        if [ "$shards" -eq 0 ]; then
-          echo "No params_shard_* found in downloaded repo; attempting conversion with mlc_llm convert_weight (this may be slow)"
+        if [ "$shards" -eq 0 ] || [ "${{ github.event.inputs.force_convert }}" == "true" ]; then
+          echo "No params_shard_* found or force_convert requested; attempting conversion with mlc_llm convert_weight (this may be slow)"
           # Convert weights and generate params_shard_*.bin in the same MLC folder
           mlc_llm convert_weight ./model_weights/Qwen3-4B-q4f16_1-MLC/ \
             --quantization q4f16_1 -o ./model_weights/Qwen3-4B-q4f16_1-MLC || true
@@ -125,9 +138,13 @@ jobs:
         shards=$(find $outdir -type f -name "params_shard_*.bin" | wc -l || true)
         echo "Found $shards parameter shards"
         if [ "$shards" -lt 1 ]; then
-          echo "ERROR: no params_shard_ files produced. You may still have a system library (lib0.o/devc.o only)."
-          echo "If you intend to use MMAP with shards, ensure the model yields 'params_shard_*.bin' and 'tensor-cache.json' by running 'mlc_llm convert_weight' and re-running compile." \
-             && exit 1
+          if [ "${{ github.event.inputs.require_shards }}" == "true" ]; then
+            echo "ERROR: no params_shard_ files produced. You may still have a system library (lib0.o/devc.o only)."
+            echo "If you intend to use MMAP with shards, ensure the model yields 'params_shard_*.bin' and 'tensor-cache.json' by running 'mlc_llm convert_weight' and re-running compile." \
+               && exit 1
+          else
+            echo "WARNING: no params_shard_ files produced. Continuing because require_shards is false."
+          fi
         fi
 
     - name: Upload artifacts
@@ -143,8 +160,17 @@ jobs:
         retention-days: 30
         if-no-files-found: warn
 
-    - name: Done
+    - name: "Detect GPU kernels if requested and finish"
       run: |
+        if [ "${{ github.event.inputs.reject_gpu_kernels }}" == "true" ]; then
+          if [ -f output/lib0.o ]; then
+            if strings output/lib0.o | grep -iE 'gpu|metal' >/dev/null 2>&1; then
+              echo "ERROR: GPU-specific kernels found in lib0.o but reject_gpu_kernels=true; failing the workflow" && exit 1
+            else
+              echo "No GPU kernels detected in lib0.o"
+            fi
+          fi
+        fi
         echo "✅ CPU-only compilation workflow finished. Check artifact for tensor-cache.json and params_shard_*.bin"
         echo "" 
         echo "Runtime guidance:" 
