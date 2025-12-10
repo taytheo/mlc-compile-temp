@@ -39,6 +39,21 @@ jobs:
         python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
         cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
         python3 .github/scripts/update_mlc_config.py
+        # debug: list model_weights contents
+        echo "=== Model weights content ==="
+        find model_weights -maxdepth 3 -type f | sed -n '1,200p'
+
+        # if no params_shard_*.bin present, try converting HF weights to MLC format
+        shards=$(find model_weights -type f -name "params_shard_*.bin" | wc -l || true)
+        if [ "$shards" -eq 0 ]; then
+          echo "No params_shard_* found in downloaded repo; attempting conversion with mlc_llm convert_weight (this may be slow)"
+          # We guess repo path; adjust if your repo has a different layout
+          # convert to MLC format and place under the same model directory
+          mlc_llm convert_weight ./model_weights/Qwen3-4B-q4f16_1-MLC/ \
+            --quantization q4f16_1 -o ./model_weights/Qwen3-4B-q4f16_1-MLC-MLC || true
+          echo "=== Post-conversion listing ==="
+          find model_weights -maxdepth 4 -type f -name "params_shard_*" | sed -n '1,200p'
+        fi
 
     - name: Extra config for shard+cpu (edit mlc-chat-config JSON)
       run: |
@@ -58,11 +73,13 @@ jobs:
         echo "=== CPU compilation output ==="
         ls -la ./output/
 
-    - name: Extract compiled files
+    - name: Extract compiled files (and list tar contents)
       if: success()
       run: |
         cd output
         if [ -f qwen3_q4f16_1-cpu-arm64.tar ]; then
+          echo "=== Tar contents ==="
+          tar -tvf qwen3_q4f16_1-cpu-arm64.tar | sed -n '1,200p'
           tar -xvf qwen3_q4f16_1-cpu-arm64.tar
           echo "=== Extracted files ==="
           ls -lh
@@ -73,16 +90,19 @@ jobs:
       run: |
         set -ex
         outdir=output
-        # check existence of tensor-cache.json or ndarray-cache.json
-        if [ -f "$outdir/tensor-cache.json" ]; then
-          echo "Found tensor-cache.json"
-        elif [ -f "$outdir/ndarray-cache.json" ]; then
-          echo "Found ndarray-cache.json"
+        # list all files recursively for debugging
+        echo "=== Recursive file list under $outdir ==="
+        find $outdir -maxdepth 4 -type f | sed -n '1,200p'
+
+        # check existence of tensor-cache.json or ndarray-cache.json in any nested folder
+        cache_file=$(find $outdir -type f \( -name "tensor-cache.json" -o -name "ndarray-cache.json" \) -print -quit || true)
+        if [ -n "$cache_file" ]; then
+          echo "Found cache: $cache_file"
         else
           echo "WARNING: No tensor-cache/ndarray-cache JSON found (this affects mmap strict mode)"
         fi
-        # count param shards
-        shards=$(ls $outdir/params_shard_*.bin 2>/dev/null | wc -l || true)
+        # count param shards anywhere under the outdir
+        shards=$(find $outdir -type f -name "params_shard_*.bin" | wc -l || true)
         echo "Found $shards parameter shards"
         if [ "$shards" -lt 1 ]; then
           echo "ERROR: no params_shard_ files produced" && exit 1
