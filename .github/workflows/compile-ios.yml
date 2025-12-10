@@ -43,16 +43,17 @@ jobs:
         echo "=== Model weights content ==="
         find model_weights -maxdepth 3 -type f | sed -n '1,200p'
 
-        # if no params_shard_*.bin present, try converting HF weights to MLC format
-        shards=$(find model_weights -type f -name "params_shard_*.bin" | wc -l || true)
+        # If no params_shard_* present, attempt to convert downloaded HF weights to MLC format
+        shards=$(find model_weights/Qwen3-4B-q4f16_1-MLC -type f -name "params_shard_*.bin" | wc -l || true)
         if [ "$shards" -eq 0 ]; then
           echo "No params_shard_* found in downloaded repo; attempting conversion with mlc_llm convert_weight (this may be slow)"
-          # We guess repo path; adjust if your repo has a different layout
-          # convert to MLC format and place under the same model directory
+          # Convert weights and generate params_shard_*.bin in the same MLC folder
           mlc_llm convert_weight ./model_weights/Qwen3-4B-q4f16_1-MLC/ \
-            --quantization q4f16_1 -o ./model_weights/Qwen3-4B-q4f16_1-MLC-MLC || true
+            --quantization q4f16_1 -o ./model_weights/Qwen3-4B-q4f16_1-MLC || true
+          # Run gen_config to ensure mlc-chat-config.json updated for the new weights
+          mlc_llm gen_config ./model_weights/Qwen3-4B-q4f16_1-MLC/ --quantization q4f16_1 -o ./model_weights/Qwen3-4B-q4f16_1-MLC || true
           echo "=== Post-conversion listing ==="
-          find model_weights -maxdepth 4 -type f -name "params_shard_*" | sed -n '1,200p'
+          find model_weights/Qwen3-4B-q4f16_1-MLC -maxdepth 4 -type f -name "params_shard_*" | sed -n '1,200p'
         fi
 
     - name: Extra config for shard+cpu (edit mlc-chat-config JSON)
@@ -63,6 +64,12 @@ jobs:
       run: |
         mkdir -p ./output
         echo "=== Starting CPU-only compilation (target: cpu host: arm64-apple-ios) ==="
+          # verify params_shard files are present in the modelWeights directory
+          if [ -z "$(find ./model_weights/Qwen3-4B-q4f16_1-MLC -type f -name 'params_shard_*.bin' -print -quit)" ]; then
+            echo "ERROR: No params_shard_*.bin files found in model_weights; compile may produce lib-only system_lib without shards."
+            echo "If you intend to use shards+mmapping, please ensure convert_weight was run appropriately."
+            # continue compile attempt anyway (the compile will embed weights if possible)
+          fi
         python -m mlc_llm compile \
           ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json \
           --device cpu \
@@ -85,6 +92,19 @@ jobs:
           ls -lh
         fi
 
+        # Basic detection: check for devc.o and lib0.o presence and size
+        if [ -f devc.o ]; then
+          echo "devc.o size: $(stat -f%z devc.o) bytes"
+        fi
+        if [ -f lib0.o ]; then
+          echo "lib0.o size: $(stat -f%z lib0.o) bytes"
+        fi
+        # Try to detect if devc.o contains embedded params (search for 'params_shard' or 'param' or 'embed_tokens')
+        if [ -f devc.o ]; then
+          echo "Searching devc.o for param indicators: 'params_shard' 'embed_tokens' 'model.embed_tokens'"
+          strings devc.o | grep -E 'params_shard|embed_tokens|model.embed_tokens' || true
+        fi
+
     - name: Validate generated artifacts (tensor-cache.json + shards)
       if: success()
       run: |
@@ -105,7 +125,9 @@ jobs:
         shards=$(find $outdir -type f -name "params_shard_*.bin" | wc -l || true)
         echo "Found $shards parameter shards"
         if [ "$shards" -lt 1 ]; then
-          echo "ERROR: no params_shard_ files produced" && exit 1
+          echo "ERROR: no params_shard_ files produced. You may still have a system library (lib0.o/devc.o only)."
+          echo "If you intend to use MMAP with shards, ensure the model yields 'params_shard_*.bin' and 'tensor-cache.json' by running 'mlc_llm convert_weight' and re-running compile." \
+             && exit 1
         fi
 
     - name: Upload artifacts
@@ -124,3 +146,8 @@ jobs:
     - name: Done
       run: |
         echo "✅ CPU-only compilation workflow finished. Check artifact for tensor-cache.json and params_shard_*.bin"
+        echo "" 
+        echo "Runtime guidance:" 
+        echo " - If params_shard_*.bin and tensor-cache.json exist, you can enable strict mmap (TVM_USE_MMAP_CACHE=1) in iOS runtime and use mmapped weights."
+        echo " - If only lib0.o + devc.o exist, the compiled model may be a system library with embedded weights. Disable TVM_USE_MMAP_CACHE or load the system library as model_lib in runtime."
+        echo " - To embed shards instead of system library, run 'mlc_llm convert_weight' to produce params_shard_*.bin and re-run compile." 
