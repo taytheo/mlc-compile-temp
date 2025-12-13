@@ -19,6 +19,10 @@ on:
         description: 'If true, require params_shard_*.bin present in model_weights (default: false)'
         required: false
         default: 'false'
+        always_download:
+          description: 'Always download the public HF snapshot rather than relying on a local path (true/false)'
+          required: false
+          default: 'true'
 
 jobs:
   compile-ios-gpu-libonly:
@@ -89,10 +93,6 @@ jobs:
               echo "ERROR: shards not found under $MODEL_DIR" && exit 1
             fi
           else
-        always_download:
-          description: 'Always download the public HF snapshot rather than relying on a local path (true/false)'
-          required: false
-          default: 'true'
             echo "require_shards=false - not requiring params_shard_*.bin"
           fi
 
