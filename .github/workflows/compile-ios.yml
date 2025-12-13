@@ -50,6 +50,9 @@ jobs:
         run: |
           mkdir -p ./output
           MODEL_DIR="${{ github.event.inputs.model_repo }}"
+          if [ -z "$MODEL_DIR" ]; then
+            MODEL_DIR="model_weights/Qwen3-4B-q4f16_1-MLC"
+          fi
           echo "Using model dir: $MODEL_DIR"
           # If model weights are not present locally, try to download from HF (ensures workflow is self-contained)
           if [ ! -d "$MODEL_DIR" ]; then
@@ -62,7 +65,8 @@ jobs:
       - name: Validate shards exist (optional)
         run: |
           if [ "${{ github.event.inputs.require_shards }}" == "true" ]; then
-            if [ -z "$(find $MODEL_DIR -type f -name 'params_shard_*.bin' -print -quit)" ]; then
+            # Portable check for shard files using ls; avoids find compatibility issues
+            if ! ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
               echo "ERROR: shards not found under $MODEL_DIR" && exit 1
             fi
           else
