@@ -66,7 +66,8 @@ jobs:
           if [[ "$MODEL_DIR" == "/" ]]; then
             echo "ERROR: model_repo was set to '/'. Please set model_repo to a relative repo path or a HF repo id. Example: model_weights/Qwen3-4B-q4f16_1-MLC" && exit 1
           fi
-          echo "Using model dir: $MODEL_DIR"
+          echo "Using model dir: '$MODEL_DIR'"
+          echo "MODEL_DIR (sanity): '$(pwd)/$MODEL_DIR'"
           # If always_download=true then prefer downloading a public HF snapshot; otherwise, if model weights are not present locally, try to download from HF
           if [[ "${{ github.event.inputs.always_download }}" == "true" ]]; then
             echo "always_download=true - download HF snapshot to $MODEL_DIR"
@@ -75,8 +76,13 @@ jobs:
             echo "Model dir not found locally; attempt to download from HF snapshot..."
             python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='$MODEL_DIR')"
           fi
+          # Backup and update config similar to CPU-only workflow
+          if [ -f "$MODEL_DIR/mlc-chat-config.json" ]; then
+            cp "$MODEL_DIR/mlc-chat-config.json" "$MODEL_DIR/mlc-chat-config.json.bak" || true
+            python3 .github/scripts/update_mlc_config.py || true
+          fi
           echo "Model folder contents:"
-          ls -la $MODEL_DIR | sed -n '1,200p'
+          ls -la "$MODEL_DIR" | sed -n '1,200p'
 
           # If no params_shard_* present, attempt to convert downloaded HF weights to MLC format
           shards=$(find "$MODEL_DIR" -type f -name "params_shard_*.bin" | wc -l || true)
@@ -94,7 +100,7 @@ jobs:
           if [[ "${{ github.event.inputs.require_shards }}" == "true" ]]; then
             # Portable check for shard files using ls; avoids find compatibility issues
             if ! ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
-              echo "ERROR: shards not found under $MODEL_DIR" && exit 1
+              echo "ERROR: shards not found under '$MODEL_DIR'" && exit 1
             fi
           else
             echo "require_shards=false - not requiring params_shard_*.bin"
@@ -103,6 +109,10 @@ jobs:
       - name: Compile GPU-only system lib (iPhone / Metal)
         run: |
           CONFIG_PATH="$MODEL_DIR/mlc-chat-config.json"
+          # Check model dir first
+          if [ ! -d "$MODEL_DIR" ]; then
+            echo "ERROR: Model directory '$MODEL_DIR' not found or not a directory" && exit 1
+          fi
           if [ ! -f "$CONFIG_PATH" ]; then
             echo "ERROR: mlc-chat-config.json not found at $CONFIG_PATH"
             echo "Model dir content:"
