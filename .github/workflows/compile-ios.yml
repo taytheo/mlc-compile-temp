@@ -1,23 +1,23 @@
-name: Compile MLC-LLM (CPU-only, iOS/MMAP + shards)
+name: Compile MLC-LLM GPU-only (iPhone) - lib-only
 
 on:
   workflow_dispatch:
     inputs:
-      force_convert:
-        description: 'Force running mlc_llm convert_weight even if params_shard_*.bin already exists in the model repo (true/false)'
+      system_lib_prefix:
+        description: 'Name prefix for the generated system library (default: qwen3_q4f16_1)'
+        required: false
+        default: 'qwen3_q4f16_1'
+      model_repo:
+        description: 'Local folder or HF repo path to use as model_weights (default: model_weights/Qwen3-4B-q4f16_1-MLC)'
+        required: false
+        default: 'model_weights/Qwen3-4B-q4f16_1-MLC'
+      require_shards:
+        description: 'If true, require params_shard_*.bin present in model_weights (default: false)'
         required: false
         default: 'false'
-      require_shards:
-        description: 'Require params_shard_*.bin in the compile output; if false, do not fail the build when missing (true/false)'
-        required: false
-        default: 'true'
-      reject_gpu_kernels:
-        description: 'Fail the workflow if lib0.o contains GPU/Metal-specific kernels (true/false)'
-        required: false
-        default: 'true'
 
 jobs:
-  cpu-only-compile-ios:
+  compile-ios-gpu-libonly:
     runs-on: macos-14
     timeout-minutes: 240
 
@@ -26,154 +26,107 @@ jobs:
         shell: bash -el {0}
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Conda
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        python-version: "3.11"
-        activate-environment: mlc
+      - name: Setup Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.11"
+          activate-environment: mlc
 
-    - name: Install MLC-LLM (CPU builds) and dependencies
-      run: |
-        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
-        pip install huggingface_hub
+      - name: Install MLC-LLM Python package
+        run: |
+          pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
+          pip install huggingface_hub
 
-    - name: Patch MLC-LLM bool type bug
-      run: |
-        echo "🔧 Applying MLC-LLM Bool 타입 버그 패치 (GitHub Issue #3389)"
-        python3 .github/scripts/patch_mlc_bool_bug.py || true
+      - name: Patch MLC-LLM bool type bug
+        run: |
+          echo "🔧 Applying MLC-LLM Bool 타입 버그 패치 (GitHub Issue #3389)"
+          python3 .github/scripts/patch_mlc_bool_bug.py || true
 
-    - name: Download model and create custom config
-      run: |
-        mkdir -p model_weights
-        python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
-        cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak
-        python3 .github/scripts/update_mlc_config.py
-        # debug: list model_weights contents
-        echo "=== Model weights content ==="
-        find model_weights -maxdepth 3 -type f | sed -n '1,200p'
-
-        # If no params_shard_* present, attempt to convert downloaded HF weights to MLC format
-        shards=$(find model_weights/Qwen3-4B-q4f16_1-MLC -type f -name "params_shard_*.bin" | wc -l || true)
-        if [ "$shards" -eq 0 ] || [ "${{ github.event.inputs.force_convert }}" == "true" ]; then
-          echo "No params_shard_* found or force_convert requested; attempting conversion with mlc_llm convert_weight (this may be slow)"
-          # Convert weights and generate params_shard_*.bin in the same MLC folder
-          mlc_llm convert_weight ./model_weights/Qwen3-4B-q4f16_1-MLC/ \
-            --quantization q4f16_1 -o ./model_weights/Qwen3-4B-q4f16_1-MLC || true
-          # Run gen_config to ensure mlc-chat-config.json updated for the new weights
-          mlc_llm gen_config ./model_weights/Qwen3-4B-q4f16_1-MLC/ --quantization q4f16_1 -o ./model_weights/Qwen3-4B-q4f16_1-MLC || true
-          echo "=== Post-conversion listing ==="
-          find model_weights/Qwen3-4B-q4f16_1-MLC -maxdepth 4 -type f -name "params_shard_*" | sed -n '1,200p'
-        fi
-
-    - name: Extra config for shard+cpu (edit mlc-chat-config JSON)
-      run: |
-        python3 .github/scripts/set_cpu_shard_config.py
-
-    - name: "Compile for CPU (iOS host triple: arm64-apple-ios), generate tensor-cache + shards"
-      run: |
-        mkdir -p ./output
-        echo "=== Starting CPU-only compilation (target: cpu host: arm64-apple-ios) ==="
-          # verify params_shard files are present in the modelWeights directory
-          if [ -z "$(find ./model_weights/Qwen3-4B-q4f16_1-MLC -type f -name 'params_shard_*.bin' -print -quit)" ]; then
-            echo "ERROR: No params_shard_*.bin files found in model_weights; compile may produce lib-only system_lib without shards."
-            echo "If you intend to use shards+mmapping, please ensure convert_weight was run appropriately."
-            # continue compile attempt anyway (the compile will embed weights if possible)
+      - name: Prepare model weights
+        run: |
+          mkdir -p ./output
+          MODEL_DIR="${{ github.event.inputs.model_repo }}"
+          echo "Using model dir: $MODEL_DIR"
+          # If model weights are not present locally, try to download from HF (ensures workflow is self-contained)
+          if [ ! -d "$MODEL_DIR" ]; then
+            echo "Model dir not found locally; attempt to download from HF snapshot..."
+            python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='$MODEL_DIR')"
           fi
-        python -m mlc_llm compile \
-          ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json \
-          --device cpu \
-          --host arm64-apple-ios \
-          --overrides "tensor_parallel_shards=4;prefill_chunk_size=32;context_window_size=1024;max_batch_size=1" \
-          --output ./output/qwen3_q4f16_1-cpu-arm64.tar \
-          2>&1 | tee compile_cpu_log.txt || (cat compile_cpu_log.txt && exit 1)
-        echo "=== CPU compilation output ==="
-        ls -la ./output/
+          echo "Model folder contents:"
+          ls -la $MODEL_DIR | sed -n '1,200p'
 
-    - name: Extract compiled files (and list tar contents)
-      if: success()
-      run: |
-        cd output
-        if [ -f qwen3_q4f16_1-cpu-arm64.tar ]; then
-          echo "=== Tar contents ==="
-          tar -tvf qwen3_q4f16_1-cpu-arm64.tar | sed -n '1,200p'
-          tar -xvf qwen3_q4f16_1-cpu-arm64.tar
-          echo "=== Extracted files ==="
-          ls -lh
-        fi
-
-        # Basic detection: check for devc.o and lib0.o presence and size
-        if [ -f devc.o ]; then
-          echo "devc.o size: $(stat -f%z devc.o) bytes"
-        fi
-        if [ -f lib0.o ]; then
-          echo "lib0.o size: $(stat -f%z lib0.o) bytes"
-        fi
-        # Try to detect if devc.o contains embedded params (search for 'params_shard' or 'param' or 'embed_tokens')
-        if [ -f devc.o ]; then
-          echo "Searching devc.o for param indicators: 'params_shard' 'embed_tokens' 'model.embed_tokens'"
-          strings devc.o | grep -E 'params_shard|embed_tokens|model.embed_tokens' || true
-        fi
-
-    - name: Validate generated artifacts (tensor-cache.json + shards)
-      if: success()
-      run: |
-        set -ex
-        outdir=output
-        # list all files recursively for debugging
-        echo "=== Recursive file list under $outdir ==="
-        find $outdir -maxdepth 4 -type f | sed -n '1,200p'
-
-        # check existence of tensor-cache.json or ndarray-cache.json in any nested folder
-        cache_file=$(find $outdir -type f \( -name "tensor-cache.json" -o -name "ndarray-cache.json" \) -print -quit || true)
-        if [ -n "$cache_file" ]; then
-          echo "Found cache: $cache_file"
-        else
-          echo "WARNING: No tensor-cache/ndarray-cache JSON found (this affects mmap strict mode)"
-        fi
-        # count param shards anywhere under the outdir
-        shards=$(find $outdir -type f -name "params_shard_*.bin" | wc -l || true)
-        echo "Found $shards parameter shards"
-        if [ "$shards" -lt 1 ]; then
+      - name: Validate shards exist (optional)
+        run: |
           if [ "${{ github.event.inputs.require_shards }}" == "true" ]; then
-            echo "ERROR: no params_shard_ files produced. You may still have a system library (lib0.o/devc.o only)."
-            echo "If you intend to use MMAP with shards, ensure the model yields 'params_shard_*.bin' and 'tensor-cache.json' by running 'mlc_llm convert_weight' and re-running compile." \
-               && exit 1
+            if [ -z "$(find $MODEL_DIR -type f -name 'params_shard_*.bin' -print -quit)" ]; then
+              echo "ERROR: shards not found under $MODEL_DIR" && exit 1
+            fi
           else
-            echo "WARNING: no params_shard_ files produced. Continuing because require_shards is false."
+            echo "require_shards=false - not requiring params_shard_*.bin"
           fi
-        fi
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: qwen3-4b-cpu-ios-compiled
-        path: |
-          output/*.tar
-          output/*.bin
-          output/*.o
-          output/*.json
-          compile_cpu_log.txt
-        retention-days: 30
-        if-no-files-found: warn
+      - name: Compile GPU-only system lib (iPhone / Metal)
+        run: |
+          CONFIG_PATH="$MODEL_DIR/mlc-chat-config.json"
+          SYSTEM_LIB_PREFIX="${{ github.event.inputs.system_lib_prefix }}"
+          OVERRIDES="context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
+          echo "CONFIG: $CONFIG_PATH"
+          echo "OUT: ./output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar"
+          python -m mlc_llm compile \
+            "$CONFIG_PATH" \
+            --device iphone \
+            --system-lib-prefix "$SYSTEM_LIB_PREFIX" \
+            --overrides "$OVERRIDES" \
+            --output ./output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar \
+            2>&1 | tee compile_iphone_libonly_log.txt
 
-    - name: "Detect GPU kernels if requested and finish"
-      run: |
-        if [ "${{ github.event.inputs.reject_gpu_kernels }}" == "true" ]; then
-          if [ -f output/lib0.o ]; then
-            if strings output/lib0.o | grep -iE 'gpu|metal' >/dev/null 2>&1; then
-              echo "ERROR: GPU-specific kernels found in lib0.o but reject_gpu_kernels=true; failing the workflow" && exit 1
+      - name: List compiled tar contents
+        if: success()
+        run: |
+          echo "=== TAR contents ==="
+          tar -tvf ./output/*.tar | sed -n '1,200p' || true
+
+      - name: Check presence of lib files in tar
+        run: |
+          OUT_TAR=$(ls ./output/*.tar | head -n 1)
+          echo "Checking tar: $OUT_TAR"
+          tar -tf "$OUT_TAR" | grep -E 'lib0.o|devc.o' || (echo "WARNING: lib0.o/devc.o not found in tar" && false)
+
+      - name: Extract and inspect devc.o for Metal strings
+        if: success()
+        run: |
+          OUT_TAR=$(ls ./output/*.tar | head -n 1)
+          TMPDIR=$(mktemp -d)
+          tar -xvf "$OUT_TAR" -C "$TMPDIR"
+          if [ -f "$TMPDIR/devc.o" ]; then
+            echo "devc.o exists: size=$(stat -f%z $TMPDIR/devc.o)"
+            if strings "$TMPDIR/devc.o" | egrep -i 'metal|metallib|MTLDevice|NT_matmul'; then
+              echo "Found Metal related strings in devc.o"
             else
-              echo "No GPU kernels detected in lib0.o"
+              echo "No explicit Metal strings found in devc.o (may still contain compiled kernels)"
             fi
           fi
-        fi
-        echo "✅ CPU-only compilation workflow finished. Check artifact for tensor-cache.json and params_shard_*.bin"
-        echo "" 
-        echo "Runtime guidance:" 
-        echo " - If params_shard_*.bin and tensor-cache.json exist, you can enable strict mmap (TVM_USE_MMAP_CACHE=1) in iOS runtime and use mmapped weights."
-        echo " - If only lib0.o + devc.o exist, the compiled model may be a system library with embedded weights. Disable TVM_USE_MMAP_CACHE or load the system library as model_lib in runtime."
-        echo " - To embed shards instead of system library, run 'mlc_llm convert_weight' to produce params_shard_*.bin and re-run compile." 
+          rm -rf "$TMPDIR"
+
+      - name: Integrate compiled lib into iOS Runner and build
+        if: success()
+        run: |
+          chmod +x ios/scripts/integrate_compiled_model.sh || true
+          EXTRACT_FOR_RUNNER=1 SKIP_BUILD=0 RUN_XCODEBUILD=1 ios/scripts/integrate_compiled_model.sh $(pwd)/output || true
+
+      - name: Upload compiled artifacts and logs
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen3-4b-ios-compiled-gpu-libonly
+          path: |
+            output/*.tar
+            output/*.o
+            output/*.json
+            compile_iphone_libonly_log.txt
+            compile_iphone_log.txt
+          retention-days: 30
