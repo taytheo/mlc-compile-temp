@@ -57,10 +57,13 @@ jobs:
       - name: Prepare model weights
         run: |
           mkdir -p ./output
-          MODEL_DIR="${{ github.event.inputs.model_repo }}"
-          # Normalize MODEL_DIR: fall back to default if empty or absolute path
-          if [[ -z "$MODEL_DIR" || "$MODEL_DIR" == /* ]]; then
-            MODEL_DIR="model_weights/Qwen3-4B-q4f16_1-MLC"
+          MODEL_ARG="${{ github.event.inputs.model_repo }}"
+          DEFAULT_MODEL_DIR="./model_weights/Qwen3-4B-q4f16_1-MLC"
+          # Default to default model dir if empty
+          if [[ -z "$MODEL_ARG" ]]; then
+            MODEL_DIR="$DEFAULT_MODEL_DIR"
+          else
+            MODEL_DIR="$MODEL_ARG"
           fi
           # Guard against accidentally using root path
           if [[ "$MODEL_DIR" == "/" ]]; then
@@ -68,18 +71,28 @@ jobs:
           fi
           echo "Using model dir: '$MODEL_DIR'"
           echo "MODEL_DIR (sanity): '$(pwd)/$MODEL_DIR'"
-          # If always_download=true then prefer downloading a public HF snapshot; otherwise, if model weights are not present locally, try to download from HF
-          if [[ "${{ github.event.inputs.always_download }}" == "true" ]]; then
-            echo "always_download=true - download HF snapshot to $MODEL_DIR"
-            python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='$MODEL_DIR')"
-          elif [ ! -d "$MODEL_DIR" ]; then
-            echo "Model dir not found locally; attempt to download from HF snapshot..."
-            python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='$MODEL_DIR')"
+          # If model_repo looks like a HF repo id (contains a slash and not a path with ./ or / prefix), treat it as repo_id and download into default model folder
+          if [[ "$MODEL_ARG" == *"/"* && "$MODEL_ARG" != ./* && "$MODEL_ARG" != /* ]]; then
+            HF_REPO="$MODEL_ARG"
+            echo "Detected HF repo id: $HF_REPO - will download to $DEFAULT_MODEL_DIR"
+            MODEL_DIR="$DEFAULT_MODEL_DIR"
+            python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='$HF_REPO', local_dir='$MODEL_DIR')"
+          else
+            # If always_download=true then prefer downloading HF snapshot to MODEL_DIR
+            if [[ "${{ github.event.inputs.always_download }}" == "true" ]]; then
+              echo "always_download=true - download HF snapshot to $MODEL_DIR"
+              python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='$MODEL_DIR')"
+            elif [ ! -d "$MODEL_DIR" ]; then
+              echo "Model dir not found locally; attempt to download from HF snapshot into $MODEL_DIR..."
+              python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='$MODEL_DIR')"
+            fi
           fi
           # Backup and update config similar to CPU-only workflow
           if [ -f "$MODEL_DIR/mlc-chat-config.json" ]; then
             cp "$MODEL_DIR/mlc-chat-config.json" "$MODEL_DIR/mlc-chat-config.json.bak" || true
             python3 .github/scripts/update_mlc_config.py || true
+            # Apply GPU-specific guidance for Metal target
+            python3 .github/scripts/set_gpu_shard_config.py "$MODEL_DIR/mlc-chat-config.json" || true
           fi
           echo "Model folder contents:"
           ls -la "$MODEL_DIR" | sed -n '1,200p'
