@@ -55,6 +55,9 @@ jobs:
           python3 .github/scripts/patch_mlc_bool_bug.py || true
 
       - name: Prepare model weights
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HUGGINGFACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           mkdir -p ./output
           # Follow CPU workflow: download snapshot and update config within the model_weights default dir
@@ -97,7 +100,10 @@ jobs:
 
       - name: Compile GPU-only system lib (iPhone / Metal)
         run: |
+          # Ensure MODEL_DIR is set (shell vars don't persist between steps in GitHub Actions)
+          MODEL_DIR="./model_weights/Qwen3-4B-q4f16_1-MLC"
           CONFIG_PATH="$MODEL_DIR/mlc-chat-config.json"
+          echo "Compiling with MODEL_DIR='$MODEL_DIR'"
           # Check model dir first
           if [ ! -d "$MODEL_DIR" ]; then
             echo "ERROR: Model directory '$MODEL_DIR' not found or not a directory" && exit 1
@@ -108,6 +114,8 @@ jobs:
             ls -la "$MODEL_DIR" || true
             exit 1
           fi
+          echo "--- mlc-chat-config.json (post-update) ---"
+          jq . "$CONFIG_PATH" || cat "$CONFIG_PATH" || true
           SYSTEM_LIB_PREFIX="${{ github.event.inputs.system_lib_prefix }}"
           OVERRIDES="context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
           echo "CONFIG: $CONFIG_PATH"
