@@ -57,6 +57,10 @@ jobs:
           if [ -z "$MODEL_DIR" ]; then
             MODEL_DIR="model_weights/Qwen3-4B-q4f16_1-MLC"
           fi
+          # Guard against accidentally using root or invalid path like '/'
+          if [ "$MODEL_DIR" = "/" ]; then
+            echo "ERROR: model_repo was set to '/'. Please set model_repo to a relative repo path or a HF repo id. Example: model_weights/Qwen3-4B-q4f16_1-MLC" && exit 1
+          fi
           echo "Using model dir: $MODEL_DIR"
           # If model weights are not present locally, try to download from HF (ensures workflow is self-contained)
           if [ ! -d "$MODEL_DIR" ]; then
