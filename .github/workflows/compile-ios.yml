@@ -11,6 +11,10 @@ on:
         description: 'Local folder or HF repo path to use as model_weights (default: model_weights/Qwen3-4B-q4f16_1-MLC)'
         required: false
         default: 'model_weights/Qwen3-4B-q4f16_1-MLC'
+      force_convert:
+        description: 'Force running mlc_llm convert_weight even if params_shard_*.bin already exists in the model repo (true/false)'
+        required: false
+        default: 'false'
       require_shards:
         description: 'If true, require params_shard_*.bin present in model_weights (default: false)'
         required: false
@@ -62,6 +66,17 @@ jobs:
           echo "Model folder contents:"
           ls -la $MODEL_DIR | sed -n '1,200p'
 
+          # If no params_shard_* present, attempt to convert downloaded HF weights to MLC format
+          shards=$(find "$MODEL_DIR" -type f -name "params_shard_*.bin" | wc -l || true)
+          if [ "$shards" -eq 0 ] || [ "${{ github.event.inputs.force_convert }}" == "true" ]; then
+            echo "No params_shard_* found or force_convert requested; attempting conversion with mlc_llm convert_weight (this may be slow)"
+            mlc_llm convert_weight "$MODEL_DIR" \
+              --quantization q4f16_1 -o "$MODEL_DIR" || true
+            mlc_llm gen_config "$MODEL_DIR" --quantization q4f16_1 -o "$MODEL_DIR" || true
+            echo "=== Post-conversion listing ==="
+            find "$MODEL_DIR" -maxdepth 4 -type f -name "params_shard_*" | sed -n '1,200p'
+          fi
+
       - name: Validate shards exist (optional)
         run: |
           if [ "${{ github.event.inputs.require_shards }}" == "true" ]; then
@@ -76,6 +91,12 @@ jobs:
       - name: Compile GPU-only system lib (iPhone / Metal)
         run: |
           CONFIG_PATH="$MODEL_DIR/mlc-chat-config.json"
+          if [ ! -f "$CONFIG_PATH" ]; then
+            echo "ERROR: mlc-chat-config.json not found at $CONFIG_PATH"
+            echo "Model dir content:"
+            ls -la "$MODEL_DIR" || true
+            exit 1
+          fi
           SYSTEM_LIB_PREFIX="${{ github.event.inputs.system_lib_prefix }}"
           OVERRIDES="context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
           echo "CONFIG: $CONFIG_PATH"
