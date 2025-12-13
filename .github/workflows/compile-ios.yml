@@ -89,6 +89,10 @@ jobs:
               echo "ERROR: shards not found under $MODEL_DIR" && exit 1
             fi
           else
+        always_download:
+          description: 'Always download the public HF snapshot rather than relying on a local path (true/false)'
+          required: false
+          default: 'true'
             echo "require_shards=false - not requiring params_shard_*.bin"
           fi
 
