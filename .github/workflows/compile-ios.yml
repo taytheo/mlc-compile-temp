@@ -19,10 +19,10 @@ on:
         description: 'If true, require params_shard_*.bin present in model_weights (default: false)'
         required: false
         default: 'false'
-        always_download:
-          description: 'Always download the public HF snapshot rather than relying on a local path (true/false)'
-          required: false
-          default: 'true'
+      always_download:
+        description: 'Always download the public HF snapshot rather than relying on a local path (true/false)'
+        required: false
+        default: 'true'
 
 jobs:
   compile-ios-gpu-libonly:
@@ -58,16 +58,20 @@ jobs:
         run: |
           mkdir -p ./output
           MODEL_DIR="${{ github.event.inputs.model_repo }}"
-          if [ -z "$MODEL_DIR" ]; then
+          # Normalize MODEL_DIR: fall back to default if empty or absolute path
+          if [[ -z "$MODEL_DIR" || "$MODEL_DIR" == /* ]]; then
             MODEL_DIR="model_weights/Qwen3-4B-q4f16_1-MLC"
           fi
-          # Guard against accidentally using root or invalid path like '/'
-          if [ "$MODEL_DIR" = "/" ]; then
+          # Guard against accidentally using root path
+          if [[ "$MODEL_DIR" == "/" ]]; then
             echo "ERROR: model_repo was set to '/'. Please set model_repo to a relative repo path or a HF repo id. Example: model_weights/Qwen3-4B-q4f16_1-MLC" && exit 1
           fi
           echo "Using model dir: $MODEL_DIR"
-          # If model weights are not present locally, try to download from HF (ensures workflow is self-contained)
-          if [ ! -d "$MODEL_DIR" ]; then
+          # If always_download=true then prefer downloading a public HF snapshot; otherwise, if model weights are not present locally, try to download from HF
+          if [[ "${{ github.event.inputs.always_download }}" == "true" ]]; then
+            echo "always_download=true - download HF snapshot to $MODEL_DIR"
+            python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='$MODEL_DIR')"
+          elif [ ! -d "$MODEL_DIR" ]; then
             echo "Model dir not found locally; attempt to download from HF snapshot..."
             python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='$MODEL_DIR')"
           fi
@@ -76,7 +80,7 @@ jobs:
 
           # If no params_shard_* present, attempt to convert downloaded HF weights to MLC format
           shards=$(find "$MODEL_DIR" -type f -name "params_shard_*.bin" | wc -l || true)
-          if [ "$shards" -eq 0 ] || [ "${{ github.event.inputs.force_convert }}" == "true" ]; then
+            if [[ "$shards" -eq 0 || "${{ github.event.inputs.force_convert }}" == "true" ]]; then
             echo "No params_shard_* found or force_convert requested; attempting conversion with mlc_llm convert_weight (this may be slow)"
             mlc_llm convert_weight "$MODEL_DIR" \
               --quantization q4f16_1 -o "$MODEL_DIR" || true
@@ -87,7 +91,7 @@ jobs:
 
       - name: Validate shards exist (optional)
         run: |
-          if [ "${{ github.event.inputs.require_shards }}" == "true" ]; then
+          if [[ "${{ github.event.inputs.require_shards }}" == "true" ]]; then
             # Portable check for shard files using ls; avoids find compatibility issues
             if ! ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
               echo "ERROR: shards not found under $MODEL_DIR" && exit 1
