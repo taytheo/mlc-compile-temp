@@ -2,32 +2,17 @@ name: Compile MLC-LLM GPU-only (iPhone) - lib-only
 
 on:
   workflow_dispatch:
-    inputs:
-      system_lib_prefix:
-        description: 'Name prefix for the generated system library (default: qwen3_q4f16_1)'
-        required: false
-        default: 'qwen3_q4f16_1'
-      model_repo:
-        description: 'Local folder or HF repo path to use as model_weights (default: model_weights/Qwen3-4B-q4f16_1-MLC)'
-        required: false
-        default: 'model_weights/Qwen3-4B-q4f16_1-MLC'
-      force_convert:
-        description: 'Force running mlc_llm convert_weight even if params_shard_*.bin already exists in the model repo (true/false)'
-        required: false
-        default: 'false'
-      require_shards:
-        description: 'If true, require params_shard_*.bin present in model_weights (default: true)'
-        required: false
-        default: 'true'
-      tensor_parallel_shards:
-        description: 'Number of tensor_parallel_shards to request during compile (default: 1). Set to model shard count to favor mmap+shard usage.'
-        required: false
-        default: '1'
 
 jobs:
   compile-ios-gpu-libonly:
     runs-on: macos-14
     timeout-minutes: 240
+    env:
+      SYSTEM_LIB_PREFIX: qwen3_q4f16_1
+      MODEL_REPO: model_weights/Qwen3-4B-q4f16_1-MLC
+      FORCE_CONVERT: 'true'
+      REQUIRE_SHARDS: 'true'
+      TENSOR_PARALLEL_SHARDS: '74'
 
     defaults:
       run:
@@ -91,7 +76,7 @@ jobs:
 
           # If no params_shard_* present, attempt to convert downloaded HF weights to MLC format
           shards=$(find "$MODEL_DIR" -type f -name "params_shard_*.bin" | wc -l || true)
-            if [[ "$shards" -eq 0 || "${{ github.event.inputs.force_convert }}" == "true" ]]; then
+            if [[ "$shards" -eq 0 || "$FORCE_CONVERT" == "true" ]]; then
             echo "No params_shard_* found or force_convert requested; attempting conversion with mlc_llm convert_weight (this may be slow)"
             mlc_llm convert_weight "$MODEL_DIR" \
               --quantization q4f16_1 -o "$MODEL_DIR" || true
@@ -103,12 +88,9 @@ jobs:
       - name: Validate shards exist (optional)
         run: |
           # MODEL_DIR may not be set in this step (shell vars don't persist between steps)
-          MODEL_DIR="${{ github.event.inputs.model_repo }}"
-          if [[ -z "$MODEL_DIR" || "$MODEL_DIR" == /* ]]; then
-            MODEL_DIR="./model_weights/Qwen3-4B-q4f16_1-MLC"
-          fi
+          MODEL_DIR="$MODEL_REPO"
           echo "Validating shards under MODEL_DIR='$MODEL_DIR'"
-          if [[ "${{ github.event.inputs.require_shards }}" == "true" ]]; then
+          if [[ "$REQUIRE_SHARDS" == "true" ]]; then
             # Portable check for shard files using ls; avoids find compatibility issues
             if ! ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
               echo "ERROR: shards not found under '$MODEL_DIR'" && exit 1
@@ -135,7 +117,7 @@ jobs:
           fi
           echo "--- mlc-chat-config.json (post-update) ---"
           jq . "$CONFIG_PATH" || cat "$CONFIG_PATH" || true
-          SYSTEM_LIB_PREFIX="${{ github.event.inputs.system_lib_prefix }}"
+          SYSTEM_LIB_PREFIX="$SYSTEM_LIB_PREFIX"
           OUT_TAR="$(pwd)/output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar"
           echo "CONFIG: $CONFIG_PATH"
           echo "=== Environment checks before compile ==="
@@ -152,19 +134,23 @@ jobs:
           echo "Listing workspace root and ios/scripts for debugging"
           ls -la || true
           ls -la ios/scripts || true
+          echo "Listing .github/scripts for debugging"
+          ls -la .github/scripts || true
           # Provide a requested shard count so the compile can favor shard+mmapping
-          TENSOR_PARALLEL_SHARDS="${{ github.event.inputs.tensor_parallel_shards }}"
+          TENSOR_PARALLEL_SHARDS="$TENSOR_PARALLEL_SHARDS"
           # Use the helper script that specifically builds a GPU-only lib-only tar (produces lib0.o and devc.o)
           if [ -f "./ios/scripts/compile_gpu_lib_only.sh" ]; then
-            # Run via bash to avoid requiring executable bit
-            echo "Running compile helper via bash"
+            echo "Found helper at ./ios/scripts/compile_gpu_lib_only.sh - running via bash"
             bash ./ios/scripts/compile_gpu_lib_only.sh "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" "$TENSOR_PARALLEL_SHARDS" 2>&1 | tee compile_iphone_libonly_log.txt
+          elif [ -f ".github/scripts/compile_gpu_lib_only.sh" ]; then
+            echo "Found helper at .github/scripts/compile_gpu_lib_only.sh - running via bash"
+            bash .github/scripts/compile_gpu_lib_only.sh "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" "$TENSOR_PARALLEL_SHARDS" 2>&1 | tee compile_iphone_libonly_log.txt
           else
             echo "WARNING: compile_gpu_lib_only.sh not found in repo workspace; running Python fallback helper"
             python3 .github/scripts/compile_gpu_lib_only_fallback.py "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" "$TENSOR_PARALLEL_SHARDS" 2>&1 | tee compile_iphone_libonly_log.txt
+          fi
           echo "=== compile helper finished; listing ./output ==="
           ls -la ./output || true
-          fi
 
       - name: Ensure shards are included in compiled tar (or add them)
         if: success()
@@ -191,7 +177,7 @@ jobs:
               tar -C "$TMPDIR" -cvf "$OUT_TAR" . || true
               echo "Shards added to tar"
             else
-              if [[ "${{ github.event.inputs.require_shards }}" == "true" ]]; then
+              if [[ "$REQUIRE_SHARDS" == "true" ]]; then
                 echo "ERROR: require_shards=true but no shards found in tar or model dir ($MODEL_DIR)" && exit 1
               else
                 echo "No shards found in tar or model dir and require_shards=false; continuing"
