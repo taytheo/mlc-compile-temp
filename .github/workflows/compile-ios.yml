@@ -16,9 +16,9 @@ on:
         required: false
         default: 'false'
       require_shards:
-        description: 'If true, require params_shard_*.bin present in model_weights (default: false)'
+        description: 'If true, require params_shard_*.bin present in model_weights (default: true)'
         required: false
-        default: 'false'
+        default: 'true'
       always_download:
         description: 'Always download the public HF snapshot rather than relying on a local path (true/false)'
         required: false
@@ -124,7 +124,7 @@ jobs:
           echo "--- mlc-chat-config.json (post-update) ---"
           jq . "$CONFIG_PATH" || cat "$CONFIG_PATH" || true
           SYSTEM_LIB_PREFIX="${{ github.event.inputs.system_lib_prefix }}"
-          OVERRIDES="context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
+          OVERRIDES="context_window_size=1024;prefill_chunk_size=32;max_batch_size=1;tensor_parallel_shards=1"
           echo "CONFIG: $CONFIG_PATH"
           echo "OUT: ./output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar"
           python -m mlc_llm compile \
@@ -134,6 +134,37 @@ jobs:
             --overrides "$OVERRIDES" \
             --output ./output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar \
             2>&1 | tee compile_iphone_libonly_log.txt
+
+      - name: Ensure shards are included in compiled tar (or add them)
+        if: success()
+        run: |
+          MODEL_DIR="./model_weights/Qwen3-4B-q4f16_1-MLC"
+          OUT_TAR=$(ls ./output/*.tar | head -n 1)
+          if [ -z "$OUT_TAR" ]; then
+            echo "ERROR: no output tar found" && exit 1
+          fi
+          TMPDIR=$(mktemp -d)
+          tar -xvf "$OUT_TAR" -C "$TMPDIR"
+          # if shards are not present in tar but exist in model dir, add them
+          if ! ls "$TMPDIR"/params_shard_*.bin >/dev/null 2>&1; then
+            if ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
+              echo "Adding shards from $MODEL_DIR into $OUT_TAR"
+              cp -a "$MODEL_DIR"/params_shard_*.bin "$TMPDIR"/ || true
+              cp -a "$MODEL_DIR"/tensor-cache.json "$TMPDIR"/ 2>/dev/null || true
+              # recreate tar with shards included
+              tar -C "$TMPDIR" -cvf "$OUT_TAR" . || true
+              echo "Shards added to tar"
+            else
+              if [[ "${{ github.event.inputs.require_shards }}" == "true" ]]; then
+                echo "ERROR: require_shards=true but no shards found in tar or model dir ($MODEL_DIR)" && exit 1
+              else
+                echo "No shards found in tar or model dir and require_shards=false; continuing"
+              fi
+            fi
+          else
+            echo "Shards are already present in tar"
+          fi
+          rm -rf "$TMPDIR"
 
       - name: List compiled tar contents
         if: success()
