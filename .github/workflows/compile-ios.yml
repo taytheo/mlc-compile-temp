@@ -96,6 +96,12 @@ jobs:
 
       - name: Validate shards exist (optional)
         run: |
+          # MODEL_DIR may not be set in this step (shell vars don't persist between steps)
+          MODEL_DIR="${{ github.event.inputs.model_repo }}"
+          if [[ -z "$MODEL_DIR" || "$MODEL_DIR" == /* ]]; then
+            MODEL_DIR="./model_weights/Qwen3-4B-q4f16_1-MLC"
+          fi
+          echo "Validating shards under MODEL_DIR='$MODEL_DIR'"
           if [[ "${{ github.event.inputs.require_shards }}" == "true" ]]; then
             # Portable check for shard files using ls; avoids find compatibility issues
             if ! ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
