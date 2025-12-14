@@ -148,6 +148,10 @@ jobs:
           echo "=== End env checks ==="
           echo "OUT: $OUT_TAR"
           mkdir -p ./output
+          echo "WORKSPACE GIT COMMIT: $(git rev-parse --short HEAD 2>/dev/null || true)"
+          echo "Listing workspace root and ios/scripts for debugging"
+          ls -la || true
+          ls -la ios/scripts || true
           # Provide a requested shard count so the compile can favor shard+mmapping
           TENSOR_PARALLEL_SHARDS="${{ github.event.inputs.tensor_parallel_shards }}"
           # Use the helper script that specifically builds a GPU-only lib-only tar (produces lib0.o and devc.o)
@@ -304,4 +308,3 @@ jobs:
             compile_iphone_libonly_log.txt
             compile_iphone_log.txt
           retention-days: 30
-
