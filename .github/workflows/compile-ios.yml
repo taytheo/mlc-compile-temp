@@ -12,7 +12,9 @@ jobs:
       MODEL_REPO: model_weights/Qwen3-4B-q4f16_1-MLC
       FORCE_CONVERT: 'true'
       REQUIRE_SHARDS: 'true'
-      TENSOR_PARALLEL_SHARDS: '74'
+      # Must divide model key-value heads (8 for Qwen3); 74 is invalid and causes compile failure.
+      # Use 8 (a divisor of 8) so tensor-parallel splitting is possible during compile.
+      TENSOR_PARALLEL_SHARDS: '8'
 
     defaults:
       run:
