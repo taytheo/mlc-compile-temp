@@ -11,10 +11,14 @@ jobs:
       SYSTEM_LIB_PREFIX: qwen3_q4f16_1
       MODEL_REPO: model_weights/Qwen3-4B-q4f16_1-MLC
       FORCE_CONVERT: 'true'
-      REQUIRE_SHARDS: 'true'
+      # By default do NOT force adding shards into the compiled tar. Set true if you want shards included.
+      REQUIRE_SHARDS: 'false'
+      INCLUDE_SHARDS_IN_TAR: 'false'
       # Must divide model key-value heads (8 for Qwen3); 74 is invalid and causes compile failure.
       # Use 8 (a divisor of 8) so tensor-parallel splitting is possible during compile.
       TENSOR_PARALLEL_SHARDS: '8'
+      # Do not copy params_shard_*.bin into Runner by default (keeps artifact small)
+      COPY_SHARDS_TO_RUNNER: 'false'
 
     defaults:
       run:
@@ -169,15 +173,19 @@ jobs:
           fi
           TMPDIR=$(mktemp -d)
           tar -xvf "$OUT_TAR" -C "$TMPDIR"
-          # if shards are not present in tar but exist in model dir, add them
+          # if shards are not present in tar but exist in model dir, optionally add them if INCLUDE_SHARDS_IN_TAR==true
           if ! ls "$TMPDIR"/params_shard_*.bin >/dev/null 2>&1; then
             if ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
-              echo "Adding shards from $MODEL_DIR into $OUT_TAR"
-              cp -a "$MODEL_DIR"/params_shard_*.bin "$TMPDIR"/ || true
-              cp -a "$MODEL_DIR"/tensor-cache.json "$TMPDIR"/ 2>/dev/null || true
-              # recreate tar with shards included
-              tar -C "$TMPDIR" -cvf "$OUT_TAR" . || true
-              echo "Shards added to tar"
+              if [[ "$INCLUDE_SHARDS_IN_TAR" == "true" ]]; then
+                echo "Adding shards from $MODEL_DIR into $OUT_TAR"
+                cp -a "$MODEL_DIR"/params_shard_*.bin "$TMPDIR"/ || true
+                cp -a "$MODEL_DIR"/tensor-cache.json "$TMPDIR"/ 2>/dev/null || true
+                # recreate tar with shards included
+                tar -C "$TMPDIR" -cvf "$OUT_TAR" . || true
+                echo "Shards added to tar"
+              else
+                echo "Shards exist in model dir but INCLUDE_SHARDS_IN_TAR=false; not adding shards to tar"
+              fi
             else
               if [[ "$REQUIRE_SHARDS" == "true" ]]; then
                 echo "ERROR: require_shards=true but no shards found in tar or model dir ($MODEL_DIR)" && exit 1
@@ -241,10 +249,16 @@ jobs:
             mkdir -p "$RUNNER_MODEL_DIR"
             echo "Extracting $OUT_TAR into $RUNNER_MODEL_DIR"
             tar -xvf "$OUT_TAR" -C "$RUNNER_MODEL_DIR" || (echo "ERROR: Failed to extract $OUT_TAR" && exit 1)
-            # If shards exist in the repo model folder, copy them into the Runner model dir so runtime can mmap them
-            if ls ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin >/dev/null 2>&1; then
-              echo "Copying params_shard_*.bin from model_weights into Runner model dir"
-              cp -a ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin "$RUNNER_MODEL_DIR" || true
+            # If enabled, copy shards into Runner model dir so runtime can mmap them
+            if [[ "$COPY_SHARDS_TO_RUNNER" == "true" ]]; then
+              if ls ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin >/dev/null 2>&1; then
+                echo "Copying params_shard_*.bin from model_weights into Runner model dir"
+                cp -a ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin "$RUNNER_MODEL_DIR" || true
+              else
+                echo "No params_shard_*.bin found to copy into Runner model dir"
+              fi
+            else
+              echo "COPY_SHARDS_TO_RUNNER=false: not copying params_shard_*.bin into Runner model dir"
             fi
             echo "Fallback extraction complete. Listing contents:" && ls -la "$RUNNER_MODEL_DIR" || true
           fi
@@ -290,9 +304,10 @@ jobs:
         with:
           name: qwen3-4b-ios-compiled-gpu-libonly
           path: |
+            # only upload the tar and object files + logs; do not include params_shard_*.bin unless explicitly desired
             output/*.tar
-            output/*.o
-            output/*.json
+            output/*devc*.o
+            output/*lib0*.o
             compile_iphone_libonly_log.txt
             compile_iphone_log.txt
           retention-days: 30
