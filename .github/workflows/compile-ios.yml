@@ -44,6 +44,17 @@ jobs:
           ls -la ios/scripts || true
           echo "Git status:" && git status --porcelain || true
 
+      - name: Show compile helper script details
+        run: |
+          echo "Checking for compile helper script: ./ios/scripts/compile_gpu_lib_only.sh"
+          if [ -f ./ios/scripts/compile_gpu_lib_only.sh ]; then
+            echo "Found file:" && ls -la ./ios/scripts/compile_gpu_lib_only.sh
+            echo "Permissions:" && stat -f "%A %N" ./ios/scripts/compile_gpu_lib_only.sh || true
+            echo "Head of file:" && head -n 20 ./ios/scripts/compile_gpu_lib_only.sh || true
+          else
+            echo "NOT FOUND: ./ios/scripts/compile_gpu_lib_only.sh"
+          fi
+
       - name: Setup Conda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -134,10 +145,12 @@ jobs:
           echo "CONFIG: $CONFIG_PATH"
           echo "OUT: $OUT_TAR"
           # Use the helper script that specifically builds a GPU-only lib-only tar (produces lib0.o and devc.o)
-          if [ -x "./ios/scripts/compile_gpu_lib_only.sh" ]; then
-            ./ios/scripts/compile_gpu_lib_only.sh "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" 2>&1 | tee compile_iphone_libonly_log.txt
+          if [ -f "./ios/scripts/compile_gpu_lib_only.sh" ]; then
+            # Run via bash to avoid requiring executable bit
+            echo "Running compile helper via bash"
+            bash ./ios/scripts/compile_gpu_lib_only.sh "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" 2>&1 | tee compile_iphone_libonly_log.txt
           else
-            echo "ERROR: compile_gpu_lib_only.sh not found or not executable" && exit 1
+            echo "ERROR: compile_gpu_lib_only.sh not found in repo workspace" && exit 1
           fi
 
       - name: Ensure shards are included in compiled tar (or add them)
