@@ -92,3 +92,4 @@ echo "If you want to integrate into the iOS Runner, run:"
 echo " EXTRACT_FOR_RUNNER=1 SKIP_BUILD=0 RUN_XCODEBUILD=1 ./ios/scripts/integrate_compiled_model.sh $(pwd)/$(dirname "$OUT_TAR")"
 
 echo "Done. Check compile_iphone_libonly_log.txt for details" 
+ 
