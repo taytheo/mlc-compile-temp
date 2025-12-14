@@ -19,6 +19,10 @@ on:
         description: 'If true, require params_shard_*.bin present in model_weights (default: true)'
         required: false
         default: 'true'
+      tensor_parallel_shards:
+        description: 'Number of tensor_parallel_shards to request during compile (default: 1). Set to model shard count to favor mmap+shard usage.'
+        required: false
+        default: '1'
 
 jobs:
   compile-ios-gpu-libonly:
@@ -30,6 +34,16 @@ jobs:
         shell: bash -el {0}
 
     steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.11"
+          activate-environment: mlc
 
       - name: Install MLC-LLM Python package
         run: |
@@ -62,6 +76,8 @@ jobs:
           fi
           echo "Model folder contents:"
           ls -la "$MODEL_DIR" | sed -n '1,200p'
+          echo "Shard count under model dir:"
+          find "$MODEL_DIR" -maxdepth 2 -type f -name 'params_shard_*.bin' -print | sed -n '1,200p' || true
 
           # If no params_shard_* present, attempt to convert downloaded HF weights to MLC format
           shards=$(find "$MODEL_DIR" -type f -name "params_shard_*.bin" | wc -l || true)
@@ -121,23 +137,33 @@ jobs:
           df -h || true
           echo "=== End env checks ==="
           echo "OUT: $OUT_TAR"
+          mkdir -p ./output
+          # Provide a requested shard count so the compile can favor shard+mmapping
+          TENSOR_PARALLEL_SHARDS="${{ github.event.inputs.tensor_parallel_shards }}"
           # Use the helper script that specifically builds a GPU-only lib-only tar (produces lib0.o and devc.o)
           if [ -f "./ios/scripts/compile_gpu_lib_only.sh" ]; then
             # Run via bash to avoid requiring executable bit
             echo "Running compile helper via bash"
-            bash ./ios/scripts/compile_gpu_lib_only.sh "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" 2>&1 | tee compile_iphone_libonly_log.txt
+            bash ./ios/scripts/compile_gpu_lib_only.sh "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" "$TENSOR_PARALLEL_SHARDS" 2>&1 | tee compile_iphone_libonly_log.txt
           else
             echo "WARNING: compile_gpu_lib_only.sh not found in repo workspace; running Python fallback helper"
-            python3 .github/scripts/compile_gpu_lib_only_fallback.py "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" 2>&1 | tee compile_iphone_libonly_log.txt
+            python3 .github/scripts/compile_gpu_lib_only_fallback.py "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" "$TENSOR_PARALLEL_SHARDS" 2>&1 | tee compile_iphone_libonly_log.txt
+          echo "=== compile helper finished; listing ./output ==="
+          ls -la ./output || true
           fi
 
       - name: Ensure shards are included in compiled tar (or add them)
         if: success()
         run: |
           MODEL_DIR="./model_weights/Qwen3-4B-q4f16_1-MLC"
-          OUT_TAR=$(ls ./output/*.tar | head -n 1)
+          # Look up any tar produced in output or repo root
+          OUT_TAR=$(ls ./output/*.tar 2>/dev/null || true)
+          OUT_TAR=$(echo "$OUT_TAR" | tr '\n' '\0' | xargs -0 -n1 | head -n 1 || true)
           if [ -z "$OUT_TAR" ]; then
-            echo "ERROR: no output tar found" && exit 1
+            echo "ERROR: no output tar found in ./output. Showing available files for debugging:" 
+            ls -la ./output || true
+            echo "Tail of compile log (if present):" && tail -n 200 compile_iphone_libonly_log.txt || true
+            exit 1
           fi
           TMPDIR=$(mktemp -d)
           tar -xvf "$OUT_TAR" -C "$TMPDIR"
