@@ -173,6 +173,13 @@ jobs:
           fi
           TMPDIR=$(mktemp -d)
           tar -xvf "$OUT_TAR" -C "$TMPDIR"
+          # Normalize library object names: if prefixed devc/lib0 exist, copy to standard names
+          if ls "$TMPDIR"/*devc*.o >/dev/null 2>&1; then
+            cp -a "$TMPDIR"/*devc*.o "$TMPDIR"/devc.o || true
+          fi
+          if ls "$TMPDIR"/*lib0*.o >/dev/null 2>&1; then
+            cp -a "$TMPDIR"/*lib0*.o "$TMPDIR"/lib0.o || true
+          fi
           # if shards are not present in tar but exist in model dir, optionally add them if INCLUDE_SHARDS_IN_TAR==true
           if ! ls "$TMPDIR"/params_shard_*.bin >/dev/null 2>&1; then
             if ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
@@ -220,6 +227,13 @@ jobs:
           OUT_TAR=$(ls ./output/*.tar | head -n 1)
           TMPDIR=$(mktemp -d)
           tar -xvf "$OUT_TAR" -C "$TMPDIR"
+          # If devc file present under another name (e.g., prefixed), normalize to devc.o
+          if ls "$TMPDIR"/*devc*.o >/dev/null 2>&1; then
+            cp -a "$TMPDIR"/*devc*.o "$TMPDIR"/devc.o || true
+          fi
+          if ls "$TMPDIR"/*lib0*.o >/dev/null 2>&1; then
+            cp -a "$TMPDIR"/*lib0*.o "$TMPDIR"/lib0.o || true
+          fi
           if [ -f "$TMPDIR/devc.o" ]; then
             echo "devc.o exists: size=$(stat -f%z $TMPDIR/devc.o)"
             if strings "$TMPDIR/devc.o" | egrep -i 'metal|metallib|MTLDevice|NT_matmul'; then
