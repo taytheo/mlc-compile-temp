@@ -117,6 +117,40 @@ def main():
                 print("  ", f)
         else:
             print("No .tar files were found in ./output or cwd; mlc_llm may have written elsewhere or failed silently.")
+        # Search recursively for any .tar files in the workspace for extra debugging
+        print("Searching recursively for any .tar files under repo root:")
+        try:
+            for root, dirs, files in os.walk('.'):
+                for fn in files:
+                    if fn.endswith('.tar'):
+                        print('  found:', os.path.join(root, fn))
+        except Exception:
+            pass
+        # Print some extra environment diagnostics
+        print('\n=== Environment diagnostics ===')
+        print('cwd:', os.getcwd())
+        try:
+            print('ls -la ./output:')
+            print('\n'.join(os.listdir('./output')))
+        except Exception:
+            print('ls ./output failed or no such dir')
+        try:
+            shards = [p for p in os.listdir(model_dir) if p.startswith('params_shard_')]
+            print(f"model_dir shard count: {len(shards)}")
+            if shards:
+                print('Example shards:', shards[:5])
+        except Exception:
+            print('Could not list shards in model_dir')
+        try:
+            import importlib
+            mlc = importlib.import_module('mlc_llm')
+            print('mlc_llm python module found at', getattr(mlc, '__file__', 'unknown'))
+            print('mlc_llm version:', getattr(mlc, '__version__', 'unknown'))
+        except Exception as e:
+            print('mlc_llm python import failed:', e)
+        print('PATH=' + os.environ.get('PATH', ''))
+        print('PYTHONPATH=' + os.environ.get('PYTHONPATH', ''))
+        print('VIRTUAL_ENV=' + os.environ.get('VIRTUAL_ENV', ''))
         # Also print mlc_llm version and PATH info for debugging
         try:
             v = subprocess.run(['mlc_llm', '--version'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
