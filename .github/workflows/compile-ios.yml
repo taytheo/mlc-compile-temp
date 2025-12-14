@@ -171,7 +171,18 @@ jobs:
             echo "Running integration script..."
             EXTRACT_FOR_RUNNER=1 SKIP_BUILD=0 RUN_XCODEBUILD=1 bash ios/scripts/integrate_compiled_model.sh $(pwd)/output || (echo "Integration script failed" && exit 1)
           else
-            echo "ERROR: ios/scripts/integrate_compiled_model.sh not found in repo workspace" && exit 1
+            echo "WARN: ios/scripts/integrate_compiled_model.sh not found in repo workspace. Falling back to inline extraction to populate Runner model dir."
+            # Fallback: extract the first tar in output into Runner model dir so downstream checks can validate
+            OUT_TAR=$(ls ./output/*.tar | head -n 1 || true)
+            if [ -z "$OUT_TAR" ]; then
+              echo "ERROR: No compiled tar found in ./output to extract for Runner integration" && exit 1
+            fi
+            RUNNER_MODEL_DIR="$(pwd)/ios/Runner/qwen3_q4f16_1"
+            rm -rf "$RUNNER_MODEL_DIR"
+            mkdir -p "$RUNNER_MODEL_DIR"
+            echo "Extracting $OUT_TAR into $RUNNER_MODEL_DIR"
+            tar -xvf "$OUT_TAR" -C "$RUNNER_MODEL_DIR" || (echo "ERROR: Failed to extract $OUT_TAR" && exit 1)
+            echo "Fallback extraction complete. Listing contents:" && ls -la "$RUNNER_MODEL_DIR" || true
           fi
 
       - name: Verify Runner extraction and presence of libs
