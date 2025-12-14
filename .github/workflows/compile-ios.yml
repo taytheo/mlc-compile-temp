@@ -37,6 +37,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: "Debug: list ios/scripts after checkout"
+        run: |
+          echo "Workspace root: $(pwd)"
+          echo "Listing ios/scripts (if present):"
+          ls -la ios/scripts || true
+          echo "Git status:" && git status --porcelain || true
+
       - name: Setup Conda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -159,8 +166,29 @@ jobs:
       - name: Integrate compiled lib into iOS Runner and build
         if: success()
         run: |
-          chmod +x ios/scripts/integrate_compiled_model.sh || true
-          EXTRACT_FOR_RUNNER=1 SKIP_BUILD=0 RUN_XCODEBUILD=1 ios/scripts/integrate_compiled_model.sh $(pwd)/output || true
+          # Prefer running the integration script via bash to avoid executable-permission issues
+          if [ -f "ios/scripts/integrate_compiled_model.sh" ]; then
+            echo "Running integration script..."
+            EXTRACT_FOR_RUNNER=1 SKIP_BUILD=0 RUN_XCODEBUILD=1 bash ios/scripts/integrate_compiled_model.sh $(pwd)/output || (echo "Integration script failed" && exit 1)
+          else
+            echo "ERROR: ios/scripts/integrate_compiled_model.sh not found in repo workspace" && exit 1
+          fi
+
+      - name: Verify Runner extraction and presence of libs
+        if: success()
+        run: |
+          RUNNER_MODEL_DIR="ios/Runner/qwen3_q4f16_1"
+          if [ ! -d "$RUNNER_MODEL_DIR" ]; then
+            echo "ERROR: Runner model dir not found: $RUNNER_MODEL_DIR" && exit 1
+          fi
+          echo "Listing Runner model dir:"
+          ls -la "$RUNNER_MODEL_DIR" || true
+          if ! find "$RUNNER_MODEL_DIR" -maxdepth 1 -type f -iname '*devc*.o' -print -quit | grep -q .; then
+            echo "ERROR: devc.o not found in Runner model dir" && exit 1
+          fi
+          if ! find "$RUNNER_MODEL_DIR" -maxdepth 1 -type f -iname '*lib0*.o' -print -quit | grep -q .; then
+            echo "ERROR: lib0.o not found in Runner model dir" && exit 1
+          fi
 
       - name: Upload compiled artifacts and logs
         if: success()
