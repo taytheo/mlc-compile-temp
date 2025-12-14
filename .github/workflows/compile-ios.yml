@@ -182,6 +182,11 @@ jobs:
             mkdir -p "$RUNNER_MODEL_DIR"
             echo "Extracting $OUT_TAR into $RUNNER_MODEL_DIR"
             tar -xvf "$OUT_TAR" -C "$RUNNER_MODEL_DIR" || (echo "ERROR: Failed to extract $OUT_TAR" && exit 1)
+            # If shards exist in the repo model folder, copy them into the Runner model dir so runtime can mmap them
+            if ls ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin >/dev/null 2>&1; then
+              echo "Copying params_shard_*.bin from model_weights into Runner model dir"
+              cp -a ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin "$RUNNER_MODEL_DIR" || true
+            fi
             echo "Fallback extraction complete. Listing contents:" && ls -la "$RUNNER_MODEL_DIR" || true
           fi
 
@@ -200,6 +205,25 @@ jobs:
           if ! find "$RUNNER_MODEL_DIR" -maxdepth 1 -type f -iname '*lib0*.o' -print -quit | grep -q .; then
             echo "ERROR: lib0.o not found in Runner model dir" && exit 1
           fi
+
+      - name: Inspect extracted libs for GPU indicators and embedded shards
+        if: success()
+        run: |
+          RUNNER_MODEL_DIR="ios/Runner/qwen3_q4f16_1"
+          echo "Scanning for lib files in $RUNNER_MODEL_DIR"
+          for f in $(find "$RUNNER_MODEL_DIR" -maxdepth 1 -type f -iname '*devc*.o' -o -iname '*lib0*.o' -print 2>/dev/null || true); do
+            echo "--- Inspecting: $f ---"
+            echo "Size: $(stat -f%z "$f") bytes"
+            echo "Searching for shard references (params_shard|embed_tokens)"
+            strings "$f" | egrep -i 'params_shard|embed_tokens|model.embed_tokens' || true
+            echo "Searching for GPU/Metal indicators"
+            strings "$f" | egrep -i 'metal|metallib|MTLDevice|MPSGraph|MTLCreateSystemDefaultDevice' || true
+            if command -v nm >/dev/null 2>&1; then
+              nm -A "$f" 2>/dev/null | egrep -i 'MTL|metal|MPS|cuda|cl' || true
+            fi
+          done
+          echo "Check if shard files exist in Runner dir"
+          ls -la "$RUNNER_MODEL_DIR"/params_shard_*.bin || echo "No params_shard_*.bin in Runner dir"
 
       - name: Upload compiled artifacts and logs
         if: success()
