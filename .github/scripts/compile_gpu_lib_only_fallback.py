@@ -69,9 +69,9 @@ def main():
 
     overrides = "tensor_parallel_shards=1;context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
 
+    # Invoke mlc_llm via the current python interpreter to avoid PATH/entrypoint issues
     cmd = [
-        sys.executable.replace('python', 'mlc_llm') if False else 'mlc_llm',
-        'compile',
+        sys.executable, '-m', 'mlc_llm', 'compile',
         config,
         '--device', 'iphone',
         '--system-lib-prefix', sys_prefix,
@@ -85,17 +85,39 @@ def main():
     with open('compile_iphone_libonly_log.txt', 'w') as logf:
         proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         logf.write(proc.stdout)
-        print(proc.stdout)
+        # Always print the last part of the compile log for diagnostics
+        tail = '\n'.join(proc.stdout.splitlines()[-200:])
+        print("--- tail of compile log (last 200 lines) ---")
+        print(tail)
         if proc.returncode != 0:
-            print("ERROR: mlc_llm compile failed. See compile_iphone_libonly_log.txt for details", file=sys.stderr)
-            # print tail for convenience
-            tail = '\n'.join(proc.stdout.splitlines()[-40:])
-            print("--- tail of compile log ---")
-            print(tail)
+            print("ERROR: mlc_llm compile failed (non-zero exit). See compile_iphone_libonly_log.txt for full details", file=sys.stderr)
             sys.exit(1)
 
     if not os.path.isfile(out_tar):
+        # Try to discover any .tar files in common output locations for debugging
+        found = []
+        for d in ['./output', '.']:
+            try:
+                for fname in os.listdir(d):
+                    if fname.endswith('.tar'):
+                        found.append(os.path.join(d, fname))
+            except Exception:
+                pass
         print(f"ERROR: Expected output tar not found at {out_tar}", file=sys.stderr)
+        if found:
+            print("But the following .tar files were found in common locations:")
+            for f in found:
+                print("  ", f)
+        else:
+            print("No .tar files were found in ./output or cwd; mlc_llm may have written elsewhere or failed silently.")
+        # Also print mlc_llm version and PATH info for debugging
+        try:
+            v = subprocess.run(['mlc_llm', '--version'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            print('mlc_llm --version output:')
+            print(v.stdout)
+        except Exception:
+            print('mlc_llm not found in PATH or --version failed')
+        print('PATH=' + os.environ.get('PATH', ''))
         sys.exit(1)
 
     print("Compile finished. Checking output tar contents ...")
