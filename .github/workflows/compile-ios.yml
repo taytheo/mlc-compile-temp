@@ -45,6 +45,16 @@ jobs:
           python-version: "3.11"
           activate-environment: mlc
 
+      - name: Verify runner architecture is Apple Silicon (arm64)
+        run: |
+          echo "uname -m: $(uname -m)"
+          # On macOS Apple Silicon, uname -m should be 'arm64'
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "ERROR: Runner architecture is not arm64 (Apple Silicon). This compilation requires Apple Silicon (arm64) to produce iPhone/Metal objects."
+            echo "If you need to run on Apple Silicon, use GitHub-hosted macOS arm64 runners or a self-hosted Apple Silicon runner."
+            exit 1
+          fi
+
       - name: Install MLC-LLM Python package
         run: |
           pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
