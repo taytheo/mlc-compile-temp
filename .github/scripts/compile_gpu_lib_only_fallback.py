@@ -69,6 +69,13 @@ def main():
 
     overrides = "tensor_parallel_shards=1;context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
 
+    # Try to ensure mlc_llm is installed into the active Python environment to avoid "command not found" issues
+    try:
+        print('Attempting to ensure mlc_llm is installed in this Python environment...')
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '--pre', '-U', '-f', 'https://mlc.ai/wheels', 'mlc-llm-nightly-cpu', 'mlc-ai-nightly-cpu'], check=True)
+    except subprocess.CalledProcessError:
+        print('Warning: pip install of mlc_llm failed (continuing and attempting compile; may still fail)')
+
     # Invoke mlc_llm via the current python interpreter to avoid PATH/entrypoint issues
     cmd = [
         sys.executable, '-m', 'mlc_llm', 'compile',
@@ -145,4 +152,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
