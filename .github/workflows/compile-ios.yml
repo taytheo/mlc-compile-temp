@@ -112,6 +112,14 @@ jobs:
           SYSTEM_LIB_PREFIX="${{ github.event.inputs.system_lib_prefix }}"
           OUT_TAR="$(pwd)/output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar"
           echo "CONFIG: $CONFIG_PATH"
+          echo "=== Environment checks before compile ==="
+          echo "which python: $(which python || true)"
+          python --version || true
+          echo "pip show mlc_llm:" && python -m pip show mlc_llm || true
+          echo "python -c 'import mlc_llm; print(mlc_llm.__version__, mlc_llm.__file__)'" && python -c "import mlc_llm; print(getattr(mlc_llm, '__version__', 'no-version'), getattr(mlc_llm, '__file__', 'no-file'))" || true
+          python -m mlc_llm --version 2>&1 || true
+          df -h || true
+          echo "=== End env checks ==="
           echo "OUT: $OUT_TAR"
           # Use the helper script that specifically builds a GPU-only lib-only tar (produces lib0.o and devc.o)
           if [ -f "./ios/scripts/compile_gpu_lib_only.sh" ]; then
