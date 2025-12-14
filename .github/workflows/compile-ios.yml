@@ -130,16 +130,15 @@ jobs:
           echo "--- mlc-chat-config.json (post-update) ---"
           jq . "$CONFIG_PATH" || cat "$CONFIG_PATH" || true
           SYSTEM_LIB_PREFIX="${{ github.event.inputs.system_lib_prefix }}"
-          OVERRIDES="context_window_size=1024;prefill_chunk_size=32;max_batch_size=1;tensor_parallel_shards=1"
+          OUT_TAR="$(pwd)/output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar"
           echo "CONFIG: $CONFIG_PATH"
-          echo "OUT: ./output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar"
-          python -m mlc_llm compile \
-            "$CONFIG_PATH" \
-            --device iphone \
-            --system-lib-prefix "$SYSTEM_LIB_PREFIX" \
-            --overrides "$OVERRIDES" \
-            --output ./output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar \
-            2>&1 | tee compile_iphone_libonly_log.txt
+          echo "OUT: $OUT_TAR"
+          # Use the helper script that specifically builds a GPU-only lib-only tar (produces lib0.o and devc.o)
+          if [ -x "./ios/scripts/compile_gpu_lib_only.sh" ]; then
+            ./ios/scripts/compile_gpu_lib_only.sh "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" 2>&1 | tee compile_iphone_libonly_log.txt
+          else
+            echo "ERROR: compile_gpu_lib_only.sh not found or not executable" && exit 1
+          fi
 
       - name: Ensure shards are included in compiled tar (or add them)
         if: success()
@@ -182,7 +181,11 @@ jobs:
         run: |
           OUT_TAR=$(ls ./output/*.tar | head -n 1)
           echo "Checking tar: $OUT_TAR"
-          tar -tf "$OUT_TAR" | grep -E 'lib0.o|devc.o' || (echo "WARNING: lib0.o/devc.o not found in tar" && false)
+          if ! tar -tf "$OUT_TAR" | grep -E 'lib0.o|devc.o' >/dev/null 2>&1; then
+            echo "ERROR: lib0.o/devc.o not found in tar. GPU lib-only build failed to produce expected objects." && exit 1
+          else
+            echo "lib0.o/devc.o found in tar"
+          fi
 
       - name: Extract and inspect devc.o for Metal strings
         if: success()
