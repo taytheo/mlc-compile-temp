@@ -67,7 +67,15 @@ def main():
     out_dir = os.path.dirname(out_tar)
     os.makedirs(out_dir, exist_ok=True)
 
-    overrides = "tensor_parallel_shards=1;context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
+    # Optionally accept a tensor_parallel_shards override from a 4th positional argument
+    requested_shards = None
+    if len(sys.argv) >= 5:
+        requested_shards = sys.argv[4]
+
+    if requested_shards:
+        overrides = f"tensor_parallel_shards={requested_shards};context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
+    else:
+        overrides = "tensor_parallel_shards=1;context_window_size=1024;prefill_chunk_size=32;max_batch_size=1"
 
     # Try to ensure mlc_llm is installed into the active Python environment to avoid "command not found" issues
     try:
@@ -77,10 +85,12 @@ def main():
         print('Warning: pip install of mlc_llm failed (continuing and attempting compile; may still fail)')
 
     # Invoke mlc_llm via the current python interpreter to avoid PATH/entrypoint issues
+    # Request host triple to ensure arm64 iOS objects are produced (matches CPU workflow)
     cmd = [
         sys.executable, '-m', 'mlc_llm', 'compile',
         config,
         '--device', 'iphone',
+        '--host', 'arm64-apple-ios',
         '--system-lib-prefix', sys_prefix,
         '--overrides', overrides,
         '--output', out_tar,
