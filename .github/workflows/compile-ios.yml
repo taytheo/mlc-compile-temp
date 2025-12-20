@@ -42,7 +42,13 @@ jobs:
 
     - name: Install MLC-LLM and deps
       run: |
-        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly mlc-ai-nightly
+        echo "Attempting to install mlc-llm nightly CPU wheels (preferred)"
+        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu || {
+          echo "Nightly CPU wheels not found; falling back to stable/nightly without -cpu suffix"
+          pip install --pre -U -f https://mlc.ai/wheels mlc-llm mlc-ai || {
+            echo "ERROR: failed to install mlc-llm from index" && exit 1
+          }
+        }
         pip install huggingface_hub
 
     - name: Ensure Metal toolchain is available
