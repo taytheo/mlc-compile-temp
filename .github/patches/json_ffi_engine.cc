@@ -43,3 +43,16 @@ namespace json_ffi {
 
 // The actual content is identical to the repository source under
 // mlc-llm/cpp/json_ffi/json_ffi_engine.cc and must be kept in sync.
+
+// -----------------------------------------------------------------------------
+// CI verification aid: a globally-visible, `used` symbol that ensures this
+// translation unit will leave a recognizable marker in any object file it
+// contributes to. If the build uses this source file, `nm` or `strings` on the
+// resulting object(s) will find `MLCJSONFFIEngineForceLink` which the CI
+// verifies. Keep this string stable across patches so CI checks remain
+// deterministic.
+extern "C" {
+__attribute__((used)) __attribute__((visibility("default")))
+const char* MLCJSONFFIEngineForceLink = "MLCJSONFFIEngineForceLink_v1";
+}
+// -----------------------------------------------------------------------------
