@@ -68,6 +68,14 @@ jobs:
         sed -n '1,120p' .github/patches/json_ffi_engine.cc || true
         python3 .github/scripts/patch_jsonffi_repl.py
 
+    - name: Upload patched json_ffi copies for debugging
+      uses: actions/upload-artifact@v4
+      with:
+        name: patched-json-ffi-copies
+        path: tmp_patched_jsonffi/
+        retention-days: 7
+        if-no-files-found: warn
+
     - name: Verify json_ffi patch applied to site-packages
       run: |
         echo "Searching for installed json_ffi_engine.cc and marker strings..."
