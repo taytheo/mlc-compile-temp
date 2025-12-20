@@ -52,10 +52,9 @@ jobs:
           # copy our patch into the source tree
           mkdir -p mlc-llm-source/cpp/json_ffi
           cp .github/patches/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
-          echo "Uninstall any existing installed mlc-llm wheel to avoid conflicts"
-          pip uninstall -y mlc-llm mlc_ai || true
-          echo "Installing mlc-llm from source (editable)"
-          pip install -e ./mlc-llm-source || { echo "ERROR: failed to install mlc-llm from source" && exit 1; }
+          echo "Using local mlc-llm source by setting PYTHONPATH at compile time (no editable pip install)"
+          # quick sanity import from local source
+          PYTHONPATH=./mlc-llm-source python -c "import mlc_llm, os; print('mlc_llm from source:', getattr(mlc_llm, '__file__', 'unknown'))" || true
         else
           echo "Could not clone mlc-llm; falling back to pip wheels"
           pip install --pre -U -f https://mlc.ai/wheels mlc-llm mlc-ai || { echo "ERROR: failed to install mlc-llm from index" && exit 1; }
@@ -140,12 +139,18 @@ jobs:
         echo "mlc_llm package info and json_ffi sources (top results only)"
         python3 .github/scripts/debug_mlc_llm_package.py
 
-    - name: Compile for iPhone (with debug-dump)
+    - name: Compile for iPhone (with debug-dump, prefer local source)
       run: |
         mkdir -p output tmp_debug_dump
         echo "=== Starting mlc_llm compile (with --debug-dump) ==="
-        # capture debug IR dump and full output
-        python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+        # If we have a local source checkout, prefer it by adding it to PYTHONPATH.
+        if [ -d mlc-llm-source ]; then
+          echo "Using local mlc-llm-source in PYTHONPATH"
+          PYTHONPATH=./mlc-llm-source python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+        else
+          echo "No local source; using installed mlc-llm"
+          python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+        fi
 
     - name: Upload compile debug dump
       uses: actions/upload-artifact@v4
