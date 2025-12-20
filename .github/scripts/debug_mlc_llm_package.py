@@ -1,22 +1,50 @@
 #!/usr/bin/env python3
 """Debug helper: report mlc_llm package layout and scan for json_ffi sources.
-Prints the mlc_llm __file__ and searches a few candidate roots for
-`json_ffi_engine.cc`, printing the head of any found files (up to 80 lines).
+Gracefully handles missing `mlc_llm` imports and inspects common locations:
+ - installed site-packages under sys.prefix
+ - repo-local `mlc-llm-source` (when present)
+ - `.github/patches` fallback
+Prints the head of any found `json_ffi_engine.cc` files (up to 80 lines).
 """
 import os
 import sys
-import mlc_llm
+from pathlib import Path
 
-print('mlc_llm file:', getattr(mlc_llm, '__file__', 'unknown'))
-root = mlc_llm.__path__[0] if hasattr(mlc_llm, '__path__') else None
-print('mlc_llm root:', root)
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
-candidates = [root, sys.prefix, os.getcwd()]
+try:
+    import mlc_llm
+    mlc_llm_file = getattr(mlc_llm, '__file__', 'unknown')
+    mlc_llm_root = mlc_llm.__path__[0] if hasattr(mlc_llm, '__path__') else None
+    print('mlc_llm package file:', mlc_llm_file)
+    print('mlc_llm root:', mlc_llm_root)
+except Exception:
+    print('mlc_llm import failed; will search known locations instead')
+    mlc_llm_root = None
+
+candidates = []
+# sys.prefix/site-packages
+site_pkg = Path(sys.prefix) / 'lib' / f'python{sys.version_info.major}.{sys.version_info.minor}' / 'site-packages'
+if site_pkg.exists():
+    candidates.append(str(site_pkg))
+# mlc_llm root if import succeeded
+if mlc_llm_root:
+    candidates.append(str(mlc_llm_root))
+# repo-local possible source
+local_source = REPO_ROOT / 'mlc-llm-source'
+if local_source.exists():
+    candidates.append(str(local_source))
+# fallback patch file location
+patch_dir = REPO_ROOT / '.github' / 'patches'
+if patch_dir.exists():
+    candidates.append(str(patch_dir))
+
+seen = set()
+print('\nScanning candidate roots for json_ffi_engine.cc...')
 for p in candidates:
-    if not p:
+    if not p or p in seen:
         continue
-    if not os.path.exists(p):
-        continue
+    seen.add(p)
     print('\n=== scanning:', p, '===')
     count = 0
     for r, dirs, files in os.walk(p):
