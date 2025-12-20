@@ -141,7 +141,34 @@ def patch_mlc_llm():
     if not replaced:
         print("⚠️ Could not find an installed mlc_llm cpp/json_ffi/json_ffi_engine.cc in site-packages.")
         print("   This runner may not have mlc-llm installed yet or uses a different layout.")
-        print("   The build may still succeed if mlc_llm compile picks up local sources from repository.")
+        print("   Attempting to apply patch into local 'mlc-llm-source' checkout if present...")
+        local_source_dir = REPO_ROOT / 'mlc-llm-source' / 'cpp' / 'json_ffi'
+        try:
+            if local_source_dir.exists():
+                local_target = local_source_dir / 'json_ffi_engine.cc'
+                shutil.copy2(LOCAL_SRC, local_target)
+                print(f"  ✅ Copied patch into local mlc-llm-source at: {local_target}")
+                # write patched_targets info for debugging/artifact upload
+                outdir = REPO_ROOT / 'tmp_patched_jsonffi'
+                outdir.mkdir(parents=True, exist_ok=True)
+                with open(outdir / 'patched_targets.txt', 'w') as fh:
+                    fh.write(str(local_target) + '\n')
+                shutil.copy2(local_target, outdir / ('installed-' + Path(local_target).name))
+                print(f"  🗂 Wrote patched target info and copy to: {outdir}")
+                # Verify marker in the local copy
+                marker = 'jsonffi_contains_replacement'
+                with open(local_target, 'r') as f:
+                    content = f.read()
+                if marker in content:
+                    print(f"🔍 Verification OK: marker '{marker}' found in local mlc-llm-source {local_target}")
+                    return 0
+                else:
+                    print(f"⚠️ Marker '{marker}' not found in local copy {local_target}; please inspect the source.")
+                    return 3
+        except Exception as e:
+            print(f"  ❌ Failed to write patch into mlc-llm-source: {e}")
+
+        print("⚠️ Could not apply patch to installed site-packages or local mlc-llm-source. The build may still succeed if compile picks up local sources.")
         return 1
 
     # verification: look for a distinctive marker from our local copy
@@ -155,7 +182,7 @@ def patch_mlc_llm():
                 print(f"🔍 Verification OK: marker '{marker}' found in {target}")
                 return 0
 
-    print("⚠️ Patch applied but verification marker not found. Please inspect the installed package.")
+    print("⚠️ Patch applied but verification marker not found. Please inspect the installed package or the local source.")
     return 3
 
 if __name__ == '__main__':
