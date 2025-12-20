@@ -97,11 +97,17 @@ jobs:
         fi
         python3 .github/scripts/update_mlc_config.py
 
-    - name: Compile for iPhone
+    - name: Debug mlc_llm package layout
+      run: |
+        echo "mlc_llm package info and json_ffi sources (top results only)"
+        python3 .github/scripts/debug_mlc_llm_package.py
+
+    - name: Compile for iPhone (verbose)
       run: |
         mkdir -p output
-        echo "=== Starting mlc_llm compile ==="
-        python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+        echo "=== Starting mlc_llm compile (verbose) ==="
+        # capture verbose output, ensure intermediate build logs are kept
+        python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --verbose 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
 
     - name: Extract compiled tar and list contents
       run: |
@@ -113,10 +119,31 @@ jobs:
         else
           echo "ERROR: output/model-iphone.tar not found"
           ls -la output || true
+          echo "Dumping potential mlc-llm build cache dirs..."
+          ls -la /tmp || true
+          ls -la ~/.cache || true
           exit 1
         fi
         echo "Contents of output/":
         ls -la output || true
+
+    - name: Search build tree and artifacts for marker strings
+      run: |
+        # Search local workspace and output for our force-link marker or diagnostic markers
+        echo "Searching workspace for MLCJSONFFIEngineForceLink and jsonffi markers..."
+        grep -R --line-number "MLCJSONFFIEngineForceLink_v1\|jsonffi_contains_replacement" . || true
+        echo "Searching output object files for marker strings..."
+        for f in $(find output -type f -name '*.o' -print); do
+          echo "Inspecting: $f"
+          if strings "$f" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n >/dev/null; then
+            echo "FOUND marker in $f"
+            strings "$f" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n || true
+          else
+            echo "No marker in $f"
+          fi
+        done
+        echo "Searching typical tmp/build dirs for marker strings (may be slow)"
+        find /tmp -type f -name '*.o' -print -exec sh -c "strings '{}' | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n && echo 'FOUND in {}'" \; || true
 
     - name: Verify presence and names of lib/devc objects
       run: |
