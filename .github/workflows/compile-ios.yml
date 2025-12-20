@@ -62,6 +62,10 @@ jobs:
 
     - name: Apply json_ffi engine patch into installed package
       run: |
+        echo "--- Debug: show available repo patches ---"
+        ls -la .github/patches || true
+        echo "--- Debug: head of patch file ---"
+        sed -n '1,120p' .github/patches/json_ffi_engine.cc || true
         python3 .github/scripts/patch_jsonffi_repl.py
 
     - name: Download model snapshot
