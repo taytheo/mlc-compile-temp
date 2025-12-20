@@ -18,7 +18,30 @@ import shutil
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-LOCAL_SRC = REPO_ROOT / 'mlc-llm' / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc'
+# Prefer repository-local copy at known locations, but fall back to searching the
+# workspace for any matching file so CI runner layouts (where the mlc-llm repo
+# may be at the workspace root or nested) still work.
+PREFERRED_CANDIDATES = [
+    REPO_ROOT / 'mlc-llm' / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc',
+    REPO_ROOT / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc',
+    REPO_ROOT / 'ios' / 'mlc-llm-repo' / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc',
+]
+
+def find_local_src():
+    for p in PREFERRED_CANDIDATES:
+        if p.exists():
+            return p
+    # Last resort: glob-search for any json_ffi_engine.cc under repo
+    matches = list(REPO_ROOT.rglob('json_ffi_engine.cc'))
+    if matches:
+        # Prefer any path that contains 'mlc-llm' in it
+        for m in matches:
+            if 'mlc-llm' in str(m):
+                return m
+        return matches[0]
+    return None
+
+LOCAL_SRC = find_local_src()
 
 def find_site_pkg_paths():
     paths = []
@@ -42,8 +65,10 @@ def find_site_pkg_paths():
     return seen
 
 def patch_mlc_llm():
-    if not LOCAL_SRC.exists():
-        print(f"❌ Local source not found: {LOCAL_SRC}")
+    if LOCAL_SRC is None or not LOCAL_SRC.exists():
+        print("❌ Local source not found in workspace (searched for json_ffi_engine.cc)")
+        print(f"   Searched under: {REPO_ROOT}")
+        print("   Tip: ensure the repository checkout contains the 'mlc-llm/cpp/json_ffi/json_ffi_engine.cc' file or adjust this script.")
         sys.exit(2)
 
     site_paths = find_site_pkg_paths()
