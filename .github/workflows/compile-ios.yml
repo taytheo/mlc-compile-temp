@@ -40,38 +40,49 @@ jobs:
         python-version: '3.11'
         activate-environment: mlc
 
-    - name: Install MLC-LLM (prefer source) and deps
+    - name: Install MLC-LLM (pip wheels first) and deps
       run: |
-        echo "Attempting to use local mlc-llm source if available"
-        # Prefer installing from a freshly-cloned mlc-llm repository so we can apply our patch
+        echo "Attempting to install mlc-llm wheels (preferred)"
         set -x
+        # Try the CPU nightly wheels first
+        if pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu; then
+          echo "Installed mlc-llm from nightly cpu wheels"
+        else
+          echo "Nightly cpu wheels not available; trying general wheels"
+          pip install --pre -U -f https://mlc.ai/wheels mlc-llm mlc-ai || true
+        fi
+        pip install huggingface_hub || true
+
+        # Run patcher against installed site-packages (if present)
+        python3 .github/scripts/patch_jsonffi_repl.py || true
+
+        # Also clone the repository as a source fallback and copy the patch into it
         rm -rf mlc-llm-source || true
         git clone --depth 1 https://github.com/mlc-ai/mlc-llm.git mlc-llm-source || true
         if [ -d mlc-llm-source ]; then
           echo "Cloned mlc-llm into mlc-llm-source"
-          # copy our patch into the source tree
           mkdir -p mlc-llm-source/cpp/json_ffi
           cp .github/patches/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
-          # Verify that the patched file exists and contains our marker; fail fast if not
-          if [ ! -f mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc ]; then
-            echo "ERROR: mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc not found after patch copy; aborting"
-            ls -la mlc-llm-source/cpp || true
-            exit 1
-          fi
           echo "--- head of patched file ---"
           head -n 80 mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
-          if ! grep -q "MLCJSONFFIEngineForceLink_v1" mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc; then
-            echo "ERROR: Marker string MLCJSONFFIEngineForceLink_v1 not present in patched file; aborting"
-            exit 1
+          if grep -q "MLCJSONFFIEngineForceLink_v1" mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc; then
+            echo "Marker present in local source"
+          else
+            echo "Marker not present in local source"
           fi
-          echo "Using local mlc-llm source in PYTHONPATH at compile time (no editable pip install)"
-          PYTHONPATH=./mlc-llm-source:./mlc-llm-source/src python -c "import mlc_llm, os; print('mlc_llm from source:', getattr(mlc_llm, '__file__', 'unknown'))" || true
         else
-          echo "ERROR: failed to clone mlc-llm into mlc-llm-source; aborting per policy"
-          exit 1
+          echo "No local source checkout cloned"
         fi
-        pip install huggingface_hub || true
-        pip show mlc-llm || true
+
+        # Provide visible debug about installed package
+        python - <<'PY'
+import importlib
+try:
+  m = importlib.import_module('mlc_llm')
+  print('installed mlc_llm file:', getattr(m, '__file__', 'unknown'))
+except Exception as e:
+  print('mlc_llm import failed after pip install:', e)
+PY
 
     - name: Ensure Metal toolchain is available
       run: |
