@@ -68,6 +68,11 @@ jobs:
         sed -n '1,120p' .github/patches/json_ffi_engine.cc || true
         python3 .github/scripts/patch_jsonffi_repl.py
 
+    - name: Verify json_ffi patch applied to site-packages
+      run: |
+        echo "Searching for installed json_ffi_engine.cc and marker strings..."
+        python3 .github/scripts/verify_jsonffi_patch.py
+
     - name: Download model snapshot
       run: |
         mkdir -p model_weights
@@ -90,18 +95,53 @@ jobs:
         echo "=== Starting mlc_llm compile ==="
         python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
 
-    - name: Extract compiled tar
+    - name: Extract compiled tar and list contents
       run: |
         if [ -f output/model-iphone.tar ]; then
+          echo "Listing tar contents:"
+          tar -tf output/model-iphone.tar || true
+          echo "Extracting tar..."
           tar -xvf output/model-iphone.tar -C output || true
+        else
+          echo "ERROR: output/model-iphone.tar not found"
+          ls -la output || true
+          exit 1
         fi
         echo "Contents of output/":
         ls -la output || true
 
-    - name: Verify presence of lib0.o and devc.o
+    - name: Verify presence and names of lib/devc objects
       run: |
-        echo "Looking for lib0.o and devc.o"
-        find output -type f -name 'lib0.o' -o -name 'devc.o' -print || true
+        echo "Searching for lib0.o and devc-style object files..."
+        set -x
+        find output -type f \( -name 'lib0.o' -o -name '*devc*.o' -o -name '*_devc.o' \) -print > found_objs.txt || true
+        if [ ! -s found_objs.txt ]; then
+          echo "ERROR: No devc-style object found in output directory."
+          echo "All output files:"
+          ls -la output || true
+          exit 1
+        fi
+        cat found_objs.txt
+        # Inspect each object for marker strings and symbols
+        MISSING_MARKER=0
+        for f in $(cat found_objs.txt); do
+          echo "Inspecting $f"
+          if strings "$f" | egrep -i 'jsonffi_contains_replacement|MLCJSONFFIEngineForceLink|json_ffi' -n >/dev/null; then
+            echo "Marker string found in $f"
+          else
+            echo "Marker string NOT found in $f"
+            MISSING_MARKER=1
+          fi
+          if nm -g "$f" 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi' >/dev/null; then
+            echo "Public symbol found in $f"
+          else
+            echo "No public symbol for jsonffi found in $f"
+          fi
+        done
+        if [ "$MISSING_MARKER" -eq 1 ]; then
+          echo "ERROR: One or more object files do not contain the jsonffi marker; failing the job."
+          exit 1
+        fi
 
     - name: Upload lib0.o and devc.o artifacts
       uses: actions/upload-artifact@v4
