@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # workspace for any matching file so CI runner layouts (where the mlc-llm repo
 # may be at the workspace root or nested) still work.
 PREFERRED_CANDIDATES = [
+    REPO_ROOT / '.github' / 'patches' / 'json_ffi_engine.cc',
     REPO_ROOT / 'mlc-llm' / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc',
     REPO_ROOT / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc',
     REPO_ROOT / 'ios' / 'mlc-llm-repo' / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc',
