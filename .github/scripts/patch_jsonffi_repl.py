@@ -43,6 +43,33 @@ def find_local_src():
 
 LOCAL_SRC = find_local_src()
 
+
+def try_fetch_remote():
+    import urllib.request
+    candidates = []
+    # Primary canonical location
+    candidates.append('https://raw.githubusercontent.com/mlc-ai/mlc-llm/main/cpp/json_ffi/json_ffi_engine.cc')
+    # Try using the current repo context if available
+    gh_repo = os.environ.get('GITHUB_REPOSITORY')
+    if gh_repo:
+        candidates.append(f'https://raw.githubusercontent.com/{gh_repo}/main/mlc-llm/cpp/json_ffi/json_ffi_engine.cc')
+        candidates.append(f'https://raw.githubusercontent.com/{gh_repo}/main/cpp/json_ffi/json_ffi_engine.cc')
+
+    for url in candidates:
+        try:
+            print(f"Attempting to download json_ffi_engine.cc from: {url}")
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                if resp.status == 200:
+                    data = resp.read()
+                    out = REPO_ROOT / 'tmp_json_ffi_engine.cc'
+                    with open(out, 'wb') as f:
+                        f.write(data)
+                    print(f"Downloaded to: {out}")
+                    return out
+        except Exception as e:
+            print(f"  fetch failed: {e}")
+    return None
+
 def find_site_pkg_paths():
     paths = []
     # site.getsitepackages may not exist in some venvs, try multiple approaches
@@ -65,11 +92,18 @@ def find_site_pkg_paths():
     return seen
 
 def patch_mlc_llm():
+    global LOCAL_SRC
     if LOCAL_SRC is None or not LOCAL_SRC.exists():
         print("❌ Local source not found in workspace (searched for json_ffi_engine.cc)")
         print(f"   Searched under: {REPO_ROOT}")
-        print("   Tip: ensure the repository checkout contains the 'mlc-llm/cpp/json_ffi/json_ffi_engine.cc' file or adjust this script.")
-        sys.exit(2)
+        print("   Trying to fetch the file from GitHub raw URLs...")
+        fetched = try_fetch_remote()
+        if fetched is not None and fetched.exists():
+            print(f"  ✅ Fetched remote copy: {fetched}")
+            LOCAL_SRC = fetched
+        else:
+            print("   Tip: ensure the repository checkout contains the 'mlc-llm/cpp/json_ffi/json_ffi_engine.cc' file or adjust this script.")
+            sys.exit(2)
 
     site_paths = find_site_pkg_paths()
     replaced = False
