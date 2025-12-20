@@ -65,7 +65,7 @@ jobs:
             exit 1
           fi
           echo "Using local mlc-llm source in PYTHONPATH at compile time (no editable pip install)"
-          PYTHONPATH=./mlc-llm-source python -c "import mlc_llm, os; print('mlc_llm from source:', getattr(mlc_llm, '__file__', 'unknown'))" || true
+          PYTHONPATH=./mlc-llm-source:./mlc-llm-source/src python -c "import mlc_llm, os; print('mlc_llm from source:', getattr(mlc_llm, '__file__', 'unknown'))" || true
         else
           echo "ERROR: failed to clone mlc-llm into mlc-llm-source; aborting per policy"
           exit 1
@@ -157,7 +157,7 @@ jobs:
         # If we have a local source checkout, prefer it by adding it to PYTHONPATH.
         if [ -d mlc-llm-source ]; then
           echo "Using local mlc-llm-source in PYTHONPATH"
-          PYTHONPATH=./mlc-llm-source python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+          PYTHONPATH=./mlc-llm-source:./mlc-llm-source/src python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
         else
           echo "No local source; using installed mlc-llm"
           python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
