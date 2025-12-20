@@ -1,327 +1,117 @@
-name: Compile MLC-LLM GPU-only (iPhone) - lib-only
+name: Rebuild iOS model artifacts (lib0.o & devc.o)
 
 on:
   workflow_dispatch:
+    inputs:
+      model_repo:
+        description: 'Hugging Face repo to download (model weights)'
+        required: true
+        default: 'mlc-ai/Qwen3-4B-q4f16_1-MLC'
+      xcode_version:
+        description: 'Optional Xcode version label (unused, informational)'
+        required: false
 
 jobs:
-  compile-ios-gpu-libonly:
+  build-ios-artifacts:
     runs-on: macos-14
     timeout-minutes: 240
-    env:
-      SYSTEM_LIB_PREFIX: qwen3_q4f16_1
-      MODEL_REPO: model_weights/Qwen3-4B-q4f16_1-MLC
-      FORCE_CONVERT: 'true'
-      # By default do NOT force adding shards into the compiled tar. Set true if you want shards included.
-      REQUIRE_SHARDS: 'false'
-      INCLUDE_SHARDS_IN_TAR: 'false'
-      # Must divide model key-value heads (8 for Qwen3); 74 is invalid and causes compile failure.
-      # Use 8 (a divisor of 8) so tensor-parallel splitting is possible during compile.
-      TENSOR_PARALLEL_SHARDS: '8'
-      # Do not copy params_shard_*.bin into Runner by default (keeps artifact small)
-      COPY_SHARDS_TO_RUNNER: 'false'
 
     defaults:
       run:
         shell: bash -el {0}
 
     steps:
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Verify runner architecture is Apple Silicon (arm64)
+      run: |
+        echo "uname -m: $(uname -m)"
+        if [ "$(uname -m)" != "arm64" ]; then
+          echo "ERROR: Runner architecture is not arm64 (Apple Silicon). This compilation requires Apple Silicon (arm64) to produce iPhone/Metal objects." \
+               "If you need to run on Apple Silicon, use GitHub-hosted macOS arm64 runners or a self-hosted Apple Silicon runner."
+          exit 1
+        fi
 
-      - name: Setup Conda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: "3.11"
-          activate-environment: mlc
+    - name: Setup Conda (python environment)
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        auto-update-conda: true
+        python-version: '3.11'
+        activate-environment: mlc
 
-      - name: Verify runner architecture is Apple Silicon (arm64)
-        run: |
-          echo "uname -m: $(uname -m)"
-          # On macOS Apple Silicon, uname -m should be 'arm64'
-          if [ "$(uname -m)" != "arm64" ]; then
-            echo "ERROR: Runner architecture is not arm64 (Apple Silicon). This compilation requires Apple Silicon (arm64) to produce iPhone/Metal objects."
-            echo "If you need to run on Apple Silicon, use GitHub-hosted macOS arm64 runners or a self-hosted Apple Silicon runner."
-            exit 1
-          fi
+    - name: Install MLC-LLM and deps
+      run: |
+        pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly mlc-ai-nightly
+        pip install huggingface_hub
 
-      - name: Install MLC-LLM Python package
-        run: |
-          pip install --pre -U -f https://mlc.ai/wheels mlc-llm-nightly-cpu mlc-ai-nightly-cpu
-          pip install huggingface_hub
+    - name: Ensure Metal toolchain is available
+      run: |
+        echo "Checking Metal..."
+        if ! xcrun metal --version >/dev/null 2>&1; then
+          echo "Metal toolchain missing; downloading component... (may require sudo)"
+          sudo xcodebuild -downloadComponent MetalToolchain || true
+        fi
+        xcrun metal --version || true
 
-      - name: Patch MLC-LLM bool type bug
-        run: |
-          echo "🔧 Applying MLC-LLM Bool 타입 버그 패치 (GitHub Issue #3389)"
-          python3 .github/scripts/patch_mlc_bool_bug.py || true
+    - name: Apply json_ffi engine patch into installed package
+      run: |
+        python3 .github/scripts/patch_jsonffi_repl.py
 
-      - name: Prepare model weights
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HUGGINGFACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          mkdir -p ./output
-          # Follow CPU workflow: download snapshot and update config within the model_weights default dir
-          mkdir -p model_weights
-          python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='mlc-ai/Qwen3-4B-q4f16_1-MLC', local_dir='./model_weights/Qwen3-4B-q4f16_1-MLC')"
-          cp ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json.bak || true
-          python3 .github/scripts/update_mlc_config.py || true
-          MODEL_DIR="./model_weights/Qwen3-4B-q4f16_1-MLC"
-          # Backup and update config similar to CPU-only workflow
-          if [ -f "$MODEL_DIR/mlc-chat-config.json" ]; then
-            cp "$MODEL_DIR/mlc-chat-config.json" "$MODEL_DIR/mlc-chat-config.json.bak" || true
-            python3 .github/scripts/update_mlc_config.py || true
-            # Apply GPU-specific guidance for Metal target
-            python3 .github/scripts/set_gpu_shard_config.py "$MODEL_DIR/mlc-chat-config.json" || true
-          fi
-          echo "Model folder contents:"
-          ls -la "$MODEL_DIR" | sed -n '1,200p'
-          echo "Shard count under model dir:"
-          find "$MODEL_DIR" -maxdepth 2 -type f -name 'params_shard_*.bin' -print | sed -n '1,200p' || true
+    - name: Download model snapshot
+      run: |
+        mkdir -p model_weights
+        python - <<'PY'
+from huggingface_hub import snapshot_download
+import os
+repo = os.environ['INPUT_MODEL_REPO'] if 'INPUT_MODEL_REPO' in os.environ else '${{ github.event.inputs.model_repo }}'
+print('Downloading', repo)
+snapshot_download(repo_id=repo, local_dir='./model_weights/target')
+print('Done')
+PY
 
-          # If no params_shard_* present, attempt to convert downloaded HF weights to MLC format
-          shards=$(find "$MODEL_DIR" -type f -name "params_shard_*.bin" | wc -l || true)
-            if [[ "$shards" -eq 0 || "$FORCE_CONVERT" == "true" ]]; then
-            echo "No params_shard_* found or force_convert requested; attempting conversion with mlc_llm convert_weight (this may be slow)"
-            mlc_llm convert_weight "$MODEL_DIR" \
-              --quantization q4f16_1 -o "$MODEL_DIR" || true
-            mlc_llm gen_config "$MODEL_DIR" --quantization q4f16_1 -o "$MODEL_DIR" || true
-            echo "=== Post-conversion listing ==="
-            find "$MODEL_DIR" -maxdepth 4 -type f -name "params_shard_*" | sed -n '1,200p'
-          fi
+    - name: Copy and adjust config for iOS (prefill=32, context=1024)
+      run: |
+        # update_mlc_config.py expects the model path layout used in other workflows; copy into the expected dir
+        mkdir -p model_weights/Qwen3-4B-q4f16_1-MLC
+        # if snapshot downloaded into model_weights/target, copy its contents
+        if [ -d model_weights/target ]; then
+          cp -R model_weights/target/* model_weights/Qwen3-4B-q4f16_1-MLC/ || true
+        fi
+        python3 .github/scripts/update_mlc_config.py
 
-      - name: Validate shards exist (optional)
-        run: |
-          # MODEL_DIR may not be set in this step (shell vars don't persist between steps)
-          MODEL_DIR="$MODEL_REPO"
-          echo "Validating shards under MODEL_DIR='$MODEL_DIR'"
-          if [[ "$REQUIRE_SHARDS" == "true" ]]; then
-            # Portable check for shard files using ls; avoids find compatibility issues
-            if ! ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
-              echo "ERROR: shards not found under '$MODEL_DIR'" && exit 1
-            fi
-          else
-            echo "require_shards=false - not requiring params_shard_*.bin"
-          fi
+    - name: Compile for iPhone
+      run: |
+        mkdir -p output
+        echo "=== Starting mlc_llm compile ==="
+        python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
 
-      - name: Compile GPU-only system lib (iPhone / Metal)
-        run: |
-          # Ensure MODEL_DIR is set (shell vars don't persist between steps in GitHub Actions)
-          MODEL_DIR="./model_weights/Qwen3-4B-q4f16_1-MLC"
-          CONFIG_PATH="$MODEL_DIR/mlc-chat-config.json"
-          echo "Compiling with MODEL_DIR='$MODEL_DIR'"
-          # Check model dir first
-          if [ ! -d "$MODEL_DIR" ]; then
-            echo "ERROR: Model directory '$MODEL_DIR' not found or not a directory" && exit 1
-          fi
-          if [ ! -f "$CONFIG_PATH" ]; then
-            echo "ERROR: mlc-chat-config.json not found at $CONFIG_PATH"
-            echo "Model dir content:"
-            ls -la "$MODEL_DIR" || true
-            exit 1
-          fi
-          echo "--- mlc-chat-config.json (post-update) ---"
-          jq . "$CONFIG_PATH" || cat "$CONFIG_PATH" || true
-          SYSTEM_LIB_PREFIX="$SYSTEM_LIB_PREFIX"
-          OUT_TAR="$(pwd)/output/${SYSTEM_LIB_PREFIX}-iphone-libonly.tar"
-          echo "CONFIG: $CONFIG_PATH"
-          echo "=== Environment checks before compile ==="
-          echo "which python: $(which python || true)"
-          python --version || true
-          echo "pip show mlc_llm:" && python -m pip show mlc_llm || true
-          echo "python -c 'import mlc_llm; print(mlc_llm.__version__, mlc_llm.__file__)'" && python -c "import mlc_llm; print(getattr(mlc_llm, '__version__', 'no-version'), getattr(mlc_llm, '__file__', 'no-file'))" || true
-          python -m mlc_llm --version 2>&1 || true
-          df -h || true
-          echo "=== End env checks ==="
-          echo "OUT: $OUT_TAR"
-          mkdir -p ./output
-          echo "WORKSPACE GIT COMMIT: $(git rev-parse --short HEAD 2>/dev/null || true)"
-          echo "Listing workspace root and ios/scripts for debugging"
-          ls -la || true
-          ls -la ios/scripts || true
-          echo "Listing .github/scripts for debugging"
-          ls -la .github/scripts || true
-          # Provide a requested shard count so the compile can favor shard+mmapping
-          TENSOR_PARALLEL_SHARDS="$TENSOR_PARALLEL_SHARDS"
-          # Use the helper script that specifically builds a GPU-only lib-only tar (produces lib0.o and devc.o)
-          if [ -f "./ios/scripts/compile_gpu_lib_only.sh" ]; then
-            echo "Found helper at ./ios/scripts/compile_gpu_lib_only.sh - running via bash"
-            bash ./ios/scripts/compile_gpu_lib_only.sh "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" "$TENSOR_PARALLEL_SHARDS" 2>&1 | tee compile_iphone_libonly_log.txt
-          elif [ -f ".github/scripts/compile_gpu_lib_only.sh" ]; then
-            echo "Found helper at .github/scripts/compile_gpu_lib_only.sh - running via bash"
-            bash .github/scripts/compile_gpu_lib_only.sh "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" "$TENSOR_PARALLEL_SHARDS" 2>&1 | tee compile_iphone_libonly_log.txt
-          else
-            echo "WARNING: compile_gpu_lib_only.sh not found in repo workspace; running Python fallback helper"
-            python3 .github/scripts/compile_gpu_lib_only_fallback.py "$MODEL_DIR" "$OUT_TAR" "$SYSTEM_LIB_PREFIX" "$TENSOR_PARALLEL_SHARDS" 2>&1 | tee compile_iphone_libonly_log.txt
-          fi
-          echo "=== compile helper finished; listing ./output ==="
-          ls -la ./output || true
+    - name: Extract compiled tar
+      run: |
+        if [ -f output/model-iphone.tar ]; then
+          tar -xvf output/model-iphone.tar -C output || true
+        fi
+        echo "Contents of output/":
+        ls -la output || true
 
-      - name: Ensure shards are included in compiled tar (or add them)
-        if: success()
-        run: |
-          MODEL_DIR="./model_weights/Qwen3-4B-q4f16_1-MLC"
-          # Look up any tar produced in output or repo root
-          OUT_TAR=$(ls ./output/*.tar 2>/dev/null || true)
-          OUT_TAR=$(echo "$OUT_TAR" | tr '\n' '\0' | xargs -0 -n1 | head -n 1 || true)
-          if [ -z "$OUT_TAR" ]; then
-            echo "ERROR: no output tar found in ./output. Showing available files for debugging:" 
-            ls -la ./output || true
-            echo "Tail of compile log (if present):" && tail -n 200 compile_iphone_libonly_log.txt || true
-            exit 1
-          fi
-          TMPDIR=$(mktemp -d)
-          tar -xvf "$OUT_TAR" -C "$TMPDIR"
-          # Normalize library object names: if prefixed devc/lib0 exist, copy to standard names
-          if ls "$TMPDIR"/*devc*.o >/dev/null 2>&1; then
-            cp -a "$TMPDIR"/*devc*.o "$TMPDIR"/devc.o || true
-          fi
-          if ls "$TMPDIR"/*lib0*.o >/dev/null 2>&1; then
-            cp -a "$TMPDIR"/*lib0*.o "$TMPDIR"/lib0.o || true
-          fi
-          # if shards are not present in tar but exist in model dir, optionally add them if INCLUDE_SHARDS_IN_TAR==true
-          if ! ls "$TMPDIR"/params_shard_*.bin >/dev/null 2>&1; then
-            if ls "$MODEL_DIR"/params_shard_*.bin >/dev/null 2>&1; then
-              if [[ "$INCLUDE_SHARDS_IN_TAR" == "true" ]]; then
-                echo "Adding shards from $MODEL_DIR into $OUT_TAR"
-                cp -a "$MODEL_DIR"/params_shard_*.bin "$TMPDIR"/ || true
-                cp -a "$MODEL_DIR"/tensor-cache.json "$TMPDIR"/ 2>/dev/null || true
-                # recreate tar with shards included
-                tar -C "$TMPDIR" -cvf "$OUT_TAR" . || true
-                echo "Shards added to tar"
-              else
-                echo "Shards exist in model dir but INCLUDE_SHARDS_IN_TAR=false; not adding shards to tar"
-              fi
-            else
-              if [[ "$REQUIRE_SHARDS" == "true" ]]; then
-                echo "ERROR: require_shards=true but no shards found in tar or model dir ($MODEL_DIR)" && exit 1
-              else
-                echo "No shards found in tar or model dir and require_shards=false; continuing"
-              fi
-            fi
-          else
-            echo "Shards are already present in tar"
-          fi
-          rm -rf "$TMPDIR"
+    - name: Verify presence of lib0.o and devc.o
+      run: |
+        echo "Looking for lib0.o and devc.o"
+        find output -type f -name 'lib0.o' -o -name 'devc.o' -print || true
 
-      - name: List compiled tar contents
-        if: success()
-        run: |
-          echo "=== TAR contents ==="
-          tar -tvf ./output/*.tar | sed -n '1,200p' || true
+    - name: Upload lib0.o and devc.o artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-objects-lib0-devc
+        path: |
+          output/**/lib0.o
+          output/**/devc.o
+        retention-days: 30
+        if-no-files-found: warn
 
-      - name: Check presence of lib files in tar
-        run: |
-          OUT_TAR=$(ls ./output/*.tar | head -n 1)
-          echo "Checking tar: $OUT_TAR"
-          if ! tar -tf "$OUT_TAR" | grep -E 'lib0.o|devc.o' >/dev/null 2>&1; then
-            echo "ERROR: lib0.o/devc.o not found in tar. GPU lib-only build failed to produce expected objects." && exit 1
-          else
-            echo "lib0.o/devc.o found in tar"
-          fi
-
-      - name: Extract and inspect devc.o for Metal strings
-        if: success()
-        run: |
-          OUT_TAR=$(ls ./output/*.tar | head -n 1)
-          TMPDIR=$(mktemp -d)
-          tar -xvf "$OUT_TAR" -C "$TMPDIR"
-          # If devc file present under another name (e.g., prefixed), normalize to devc.o
-          if ls "$TMPDIR"/*devc*.o >/dev/null 2>&1; then
-            cp -a "$TMPDIR"/*devc*.o "$TMPDIR"/devc.o || true
-          fi
-          if ls "$TMPDIR"/*lib0*.o >/dev/null 2>&1; then
-            cp -a "$TMPDIR"/*lib0*.o "$TMPDIR"/lib0.o || true
-          fi
-          if [ -f "$TMPDIR/devc.o" ]; then
-            echo "devc.o exists: size=$(stat -f%z $TMPDIR/devc.o)"
-            if strings "$TMPDIR/devc.o" | egrep -i 'metal|metallib|MTLDevice|NT_matmul'; then
-              echo "Found Metal related strings in devc.o"
-            else
-              echo "No explicit Metal strings found in devc.o (may still contain compiled kernels)"
-            fi
-          fi
-          rm -rf "$TMPDIR"
-
-      - name: Integrate compiled lib into iOS Runner and build
-        if: success()
-        run: |
-          # Prefer running the integration script via bash to avoid executable-permission issues
-          if [ -f "ios/scripts/integrate_compiled_model.sh" ]; then
-            echo "Running integration script..."
-            EXTRACT_FOR_RUNNER=1 SKIP_BUILD=0 RUN_XCODEBUILD=1 bash ios/scripts/integrate_compiled_model.sh $(pwd)/output || (echo "Integration script failed" && exit 1)
-          else
-            echo "WARN: ios/scripts/integrate_compiled_model.sh not found in repo workspace. Falling back to inline extraction to populate Runner model dir."
-            # Fallback: extract the first tar in output into Runner model dir so downstream checks can validate
-            OUT_TAR=$(ls ./output/*.tar | head -n 1 || true)
-            if [ -z "$OUT_TAR" ]; then
-              echo "ERROR: No compiled tar found in ./output to extract for Runner integration" && exit 1
-            fi
-            RUNNER_MODEL_DIR="$(pwd)/ios/Runner/qwen3_q4f16_1"
-            rm -rf "$RUNNER_MODEL_DIR"
-            mkdir -p "$RUNNER_MODEL_DIR"
-            echo "Extracting $OUT_TAR into $RUNNER_MODEL_DIR"
-            tar -xvf "$OUT_TAR" -C "$RUNNER_MODEL_DIR" || (echo "ERROR: Failed to extract $OUT_TAR" && exit 1)
-            # If enabled, copy shards into Runner model dir so runtime can mmap them
-            if [[ "$COPY_SHARDS_TO_RUNNER" == "true" ]]; then
-              if ls ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin >/dev/null 2>&1; then
-                echo "Copying params_shard_*.bin from model_weights into Runner model dir"
-                cp -a ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin "$RUNNER_MODEL_DIR" || true
-              else
-                echo "No params_shard_*.bin found to copy into Runner model dir"
-              fi
-            else
-              echo "COPY_SHARDS_TO_RUNNER=false: not copying params_shard_*.bin into Runner model dir"
-            fi
-            echo "Fallback extraction complete. Listing contents:" && ls -la "$RUNNER_MODEL_DIR" || true
-          fi
-
-      - name: Verify Runner extraction and presence of libs
-        if: success()
-        run: |
-          RUNNER_MODEL_DIR="ios/Runner/qwen3_q4f16_1"
-          if [ ! -d "$RUNNER_MODEL_DIR" ]; then
-            echo "ERROR: Runner model dir not found: $RUNNER_MODEL_DIR" && exit 1
-          fi
-          echo "Listing Runner model dir:"
-          ls -la "$RUNNER_MODEL_DIR" || true
-          if ! find "$RUNNER_MODEL_DIR" -maxdepth 1 -type f -iname '*devc*.o' -print -quit | grep -q .; then
-            echo "ERROR: devc.o not found in Runner model dir" && exit 1
-          fi
-          if ! find "$RUNNER_MODEL_DIR" -maxdepth 1 -type f -iname '*lib0*.o' -print -quit | grep -q .; then
-            echo "ERROR: lib0.o not found in Runner model dir" && exit 1
-          fi
-
-      - name: Inspect extracted libs for GPU indicators and embedded shards
-        if: success()
-        run: |
-          RUNNER_MODEL_DIR="ios/Runner/qwen3_q4f16_1"
-          echo "Scanning for lib files in $RUNNER_MODEL_DIR"
-          for f in $(find "$RUNNER_MODEL_DIR" -maxdepth 1 -type f -iname '*devc*.o' -o -iname '*lib0*.o' -print 2>/dev/null || true); do
-            echo "--- Inspecting: $f ---"
-            echo "Size: $(stat -f%z "$f") bytes"
-            echo "Searching for shard references (params_shard|embed_tokens)"
-            strings "$f" | egrep -i 'params_shard|embed_tokens|model.embed_tokens' || true
-            echo "Searching for GPU/Metal indicators"
-            strings "$f" | egrep -i 'metal|metallib|MTLDevice|MPSGraph|MTLCreateSystemDefaultDevice' || true
-            if command -v nm >/dev/null 2>&1; then
-              nm -A "$f" 2>/dev/null | egrep -i 'MTL|metal|MPS|cuda|cl' || true
-            fi
-          done
-          echo "Check if shard files exist in Runner dir"
-          ls -la "$RUNNER_MODEL_DIR"/params_shard_*.bin || echo "No params_shard_*.bin in Runner dir"
-
-      - name: Upload compiled artifacts and logs
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qwen3-4b-ios-compiled-gpu-libonly
-          path: |
-            # only upload the tar and object files + logs; do not include params_shard_*.bin unless explicitly desired
-            output/*.tar
-            output/*devc*.o
-            output/*lib0*.o
-            compile_iphone_libonly_log.txt
-            compile_iphone_log.txt
-          retention-days: 30
+    - name: Upload full compile log
+      uses: actions/upload-artifact@v4
+      with:
+        name: compile-log
+        path: compile_log.txt
+        retention-days: 30
