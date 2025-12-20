@@ -108,6 +108,7 @@ def patch_mlc_llm():
 
     site_paths = find_site_pkg_paths()
     replaced = False
+    replaced_targets = []
     for sp in site_paths:
         target = Path(sp) / 'mlc_llm' / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc'
         if target.exists():
@@ -121,8 +122,22 @@ def patch_mlc_llm():
                 shutil.copy2(LOCAL_SRC, target)
                 print(f"  ✅ Replaced installed json_ffi_engine.cc with local copy")
                 replaced = True
+                replaced_targets.append(str(target))
             except Exception as e:
                 print(f"  ❌ Failed to replace file: {e}")
+
+    # write replaced targets to a file for artifact upload/debugging
+    if replaced_targets:
+        try:
+            outdir = REPO_ROOT / 'tmp_patched_jsonffi'
+            outdir.mkdir(parents=True, exist_ok=True)
+            with open(outdir / 'patched_targets.txt', 'w') as fh:
+                fh.write('\n'.join(replaced_targets) + '\n')
+            for t in replaced_targets:
+                shutil.copy2(t, outdir / ('installed-' + Path(t).name))
+            print(f"  🗂 Wrote patched target info and copies to: {outdir}")
+        except Exception as e:
+            print(f"  ❌ Failed to write patched target copies: {e}")
     if not replaced:
         print("⚠️ Could not find an installed mlc_llm cpp/json_ffi/json_ffi_engine.cc in site-packages.")
         print("   This runner may not have mlc-llm installed yet or uses a different layout.")
