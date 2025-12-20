@@ -102,12 +102,20 @@ jobs:
         echo "mlc_llm package info and json_ffi sources (top results only)"
         python3 .github/scripts/debug_mlc_llm_package.py
 
-    - name: Compile for iPhone (verbose)
+    - name: Compile for iPhone (with debug-dump)
       run: |
-        mkdir -p output
-        echo "=== Starting mlc_llm compile (verbose) ==="
-        # capture verbose output, ensure intermediate build logs are kept
-        python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --verbose 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+        mkdir -p output tmp_debug_dump
+        echo "=== Starting mlc_llm compile (with --debug-dump) ==="
+        # capture debug IR dump and full output
+        python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+
+    - name: Upload compile debug dump
+      uses: actions/upload-artifact@v4
+      with:
+        name: compile-debug-dump
+        path: tmp_debug_dump/
+        retention-days: 7
+        if-no-files-found: warn
 
     - name: Extract compiled tar and list contents
       run: |
