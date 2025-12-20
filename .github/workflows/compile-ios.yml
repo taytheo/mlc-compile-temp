@@ -52,12 +52,23 @@ jobs:
           # copy our patch into the source tree
           mkdir -p mlc-llm-source/cpp/json_ffi
           cp .github/patches/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
-          echo "Using local mlc-llm source by setting PYTHONPATH at compile time (no editable pip install)"
-          # quick sanity import from local source
+          # Verify that the patched file exists and contains our marker; fail fast if not
+          if [ ! -f mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc ]; then
+            echo "ERROR: mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc not found after patch copy; aborting"
+            ls -la mlc-llm-source/cpp || true
+            exit 1
+          fi
+          echo "--- head of patched file ---"
+          head -n 80 mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
+          if ! grep -q "MLCJSONFFIEngineForceLink_v1" mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc; then
+            echo "ERROR: Marker string MLCJSONFFIEngineForceLink_v1 not present in patched file; aborting"
+            exit 1
+          fi
+          echo "Using local mlc-llm source in PYTHONPATH at compile time (no editable pip install)"
           PYTHONPATH=./mlc-llm-source python -c "import mlc_llm, os; print('mlc_llm from source:', getattr(mlc_llm, '__file__', 'unknown'))" || true
         else
-          echo "Could not clone mlc-llm; falling back to pip wheels"
-          pip install --pre -U -f https://mlc.ai/wheels mlc-llm mlc-ai || { echo "ERROR: failed to install mlc-llm from index" && exit 1; }
+          echo "ERROR: failed to clone mlc-llm into mlc-llm-source; aborting per policy"
+          exit 1
         fi
         pip install huggingface_hub || true
         pip show mlc-llm || true
