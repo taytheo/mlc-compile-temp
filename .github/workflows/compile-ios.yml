@@ -61,14 +61,8 @@ jobs:
     - name: Download model snapshot
       run: |
         mkdir -p model_weights
-        python - <<'PY'
-from huggingface_hub import snapshot_download
-import os
-repo = os.environ['INPUT_MODEL_REPO'] if 'INPUT_MODEL_REPO' in os.environ else '${{ github.event.inputs.model_repo }}'
-print('Downloading', repo)
-snapshot_download(repo_id=repo, local_dir='./model_weights/target')
-print('Done')
-PY
+        echo "Downloading model: ${{ github.event.inputs.model_repo }}"
+        python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='${{ github.event.inputs.model_repo }}', local_dir='./model_weights/target')"
 
     - name: Copy and adjust config for iOS (prefill=32, context=1024)
       run: |
