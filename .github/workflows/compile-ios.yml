@@ -81,6 +81,32 @@ jobs:
         echo "Searching for installed json_ffi_engine.cc and marker strings..."
         python3 .github/scripts/verify_jsonffi_patch.py
 
+    - name: Show patched json_ffi copies (if any)
+      run: |
+        echo "Listing tmp_patched_jsonffi/"
+        ls -la tmp_patched_jsonffi || true
+        echo "Head of installed copy (if present):"
+        head -n 120 tmp_patched_jsonffi/installed-json_ffi_engine.cc || true
+
+    - name: Copy repo-local patch into workspace mlc-llm source (if available)
+      run: |
+        if [ -f .github/patches/json_ffi_engine.cc ] && [ -d mlc-llm ]; then
+          echo "Copying repo-local patch into mlc-llm/cpp/json_ffi/"
+          mkdir -p mlc-llm/cpp/json_ffi
+          cp .github/patches/json_ffi_engine.cc mlc-llm/cpp/json_ffi/json_ffi_engine.cc
+          echo "Installing editable mlc-llm from workspace to prefer local sources"
+          pip install -e ./mlc-llm || true
+        else
+          echo "No local mlc-llm checkout available or patch missing; skipping editable install"
+        fi
+
+    - name: Clean mlc-llm build cache (best-effort)
+      run: |
+        echo "Removing mlc-llm caches"
+        rm -rf ~/.cache/mlc_llm || true
+        rm -rf /tmp/mlc_llm* || true
+        ls -la ~/.cache || true
+
     - name: Download model snapshot
       run: |
         mkdir -p model_weights
