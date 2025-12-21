@@ -177,16 +177,34 @@ jobs:
           if [ -f .github/patches/compile_postprocess_snippet.py ]; then
             target=mlc-llm-source/python/mlc_llm/interface/compile.py
             if [ -f "$target" ]; then
-              if ! grep -q "Appended iOS static libs to" "$target"; then
-                echo >> "$target"
-                cat .github/patches/compile_postprocess_snippet.py >> "$target"
-                echo "Appended postprocess snippet into $target"
-              else
-                echo "Postprocess snippet already present in $target"
-              fi
+              echo "Attempting to insert postprocess into existing $target"
+              echo "Attempting to insert postprocess into existing $target"
+              # Insert a small exec-based postprocess call after the compile call so it runs inside the function scope
+              awk '
+              {
+                print;
+                if (!done && $0 ~ /args\.display\(\)/) {
+                  getline next
+                  print next
+                  if (next ~ /_compile\(args, model_config\)/) {
+                    print ""
+                    print "    # CI_POSTPROCESS_INJECTED: run postprocess snippet (best-effort)"
+                    print "    try:"
+                    print "        from pathlib import Path"
+                    print "        import logging, subprocess, tarfile"
+                    print "        patch = Path(__file__).resolve().parents[2] / \".github\" / \"patches\" / \"compile_postprocess_snippet.py\""
+                    print "        if patch.exists():"
+                    print "            exec(patch.read_text(), globals(), locals())"
+                    print "    except Exception as e:"
+                    print "        logging.warning(\"CI postprocess failed: %s\", e)"
+                    done=1
+                  }
+                }
+              }' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
+              echo "Inserted CI postprocess into $target"
             else
-              cp .github/patches/compile_postprocess_snippet.py "$target"
               echo "Wrote new compile.py to $target"
+              cp .github/patches/compile_postprocess_snippet.py "$target"
             fi
           else
             echo "No .github/patches/compile_postprocess_snippet.py present; skipping injection"
