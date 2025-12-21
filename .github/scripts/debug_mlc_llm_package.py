@@ -47,6 +47,16 @@ for p in candidates:
     seen.add(p)
     print('\n=== scanning:', p, '===')
     count = 0
+    # List top-level files for quick debug
+    try:
+        print('Top-level listing (up to 200 entries):')
+        for i, entry in enumerate(sorted(os.listdir(p))):
+            if i >= 200:
+                break
+            print('  ', entry)
+    except Exception:
+        pass
+
     for r, dirs, files in os.walk(p):
         for name in files:
             if name == 'json_ffi_engine.cc':
@@ -62,7 +72,18 @@ for p in candidates:
                     count += 1
                 except Exception as e:
                     print('  read failed:', e)
-        if count > 4:
+        # quick break to avoid huge output
+        if count > 6:
             break
+
+    # Also search for compiled extension modules or object files
+    try:
+        print('\nSearching for .so, .dylib, .o files in', p)
+        for r, dirs, files in os.walk(p):
+            for name in files:
+                if name.endswith(('.so', '.dylib', '.o')):
+                    print('  compiled:', os.path.join(r, name))
+    except Exception:
+        pass
 
 print('\nDone')
