@@ -175,7 +175,7 @@ jobs:
         retention-days: 7
         if-no-files-found: warn
 
-    - name: CI diagnostics: scan logs, debug-dump, and tmp dirs for jsonffi markers
+    - name: "CI diagnostics: scan logs, debug-dump, and tmp dirs for jsonffi markers"
       run: |
         bash .github/scripts/ci_diagnostics.sh || true
 
