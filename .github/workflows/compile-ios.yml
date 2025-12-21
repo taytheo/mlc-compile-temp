@@ -173,31 +173,41 @@ jobs:
       if: always()
       run: |
         echo "Attempting to build iOS static libs and append to model tar (best-effort)"
+        mkdir -p tmp_ci_diagnostics/outputs
         if [ -d mlc-llm-source ]; then
-          echo "Running ios/prepare_libs.sh"
-          bash mlc-llm-source/ios/prepare_libs.sh || echo "prepare_libs.sh failed, continuing"
+          echo "Running ios/prepare_libs.sh (logs -> tmp_ci_diagnostics/outputs/prepare_libs.log)"
+          bash mlc-llm-source/ios/prepare_libs.sh > tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "prepare_libs.sh exit code: $?" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          echo "Listing mlc-llm-source/build/lib (if any):" > tmp_ci_diagnostics/outputs/build_lib_list.txt || true
+          ls -la mlc-llm-source/build/lib >> tmp_ci_diagnostics/outputs/build_lib_list.txt 2>&1 || true
+
           if [ -d mlc-llm-source/build/lib ]; then
             echo "Appending built libs to output/model-iphone.tar"
             for f in mlc-llm-source/build/lib/*; do
               [ -f "$f" ] || continue
               echo "  adding $f"
               tar -rf output/model-iphone.tar -C "$(dirname "$f")" "$(basename "$f")" || echo "failed to add $f"
+              # copy the lib into tmp outputs for inspection
+              cp "$f" tmp_ci_diagnostics/outputs/ || true
             done
             echo "Tar contents after append:"
             tar -tf output/model-iphone.tar | sed -n '1,200p' || true
-            echo "Checking added libs for marker strings"
-            for lib in mlc-llm-source/build/lib/*; do
-              [ -f "$lib" ] || continue
-              echo "Inspecting $lib"
-              strings "$lib" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n || true
-              nm -g "$lib" 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi' -n || true
+            echo "Checking added libs for marker strings" > tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
+            for lib in tmp_ci_diagnostics/outputs/*; do
+              if [ -f "$lib" ] && (echo "$lib" | egrep -i '\.a$|\.dylib$|\.so$' >/dev/null); then
+                echo "Inspecting $lib" >> tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
+                strings "$lib" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n >> tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
+                nm -g "$lib" 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi' -n >> tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
+              fi
             done
           else
-            echo "No built iOS libs found at mlc-llm-source/build/lib; skipping append"
+            echo "No built iOS libs found at mlc-llm-source/build/lib; skipping append" > tmp_ci_diagnostics/outputs/build_lib_list.txt
           fi
         else
-          echo "mlc-llm-source not present; skipping iOS lib build/append"
+          echo "mlc-llm-source not present; skipping iOS lib build/append" > tmp_ci_diagnostics/outputs/build_lib_list.txt
         fi
+        echo "Copying diagnostics to tmp_ci_diagnostics for upload"
+        ls -la tmp_ci_diagnostics || true
 
     - name: Compile for iPhone (with debug-dump, prefer local source)
       run: |
