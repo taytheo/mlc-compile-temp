@@ -109,8 +109,10 @@ def patch_mlc_llm():
     site_paths = find_site_pkg_paths()
     replaced = False
     replaced_targets = []
+    attempted_targets = []
     for sp in site_paths:
         target = Path(sp) / 'mlc_llm' / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc'
+        attempted_targets.append(str(target))
         if target.exists():
             print(f"📍 Found installed mlc_llm source at: {target}")
             # backup original
@@ -123,8 +125,70 @@ def patch_mlc_llm():
                 print(f"  ✅ Replaced installed json_ffi_engine.cc with local copy")
                 replaced = True
                 replaced_targets.append(str(target))
+                # quick verification for marker
+                with open(target, 'r', encoding='utf-8', errors='replace') as tf:
+                    ct = tf.read()
+                if 'jsonffi_contains_replacement' in ct or 'MLCJSONFFIEngineForceLink_v1' in ct:
+                    print('  🔍 Marker detected in installed copy')
+                else:
+                    print('  ⚠️ Marker NOT detected in installed copy; keep investigating')
             except Exception as e:
                 print(f"  ❌ Failed to replace file: {e}")
+        else:
+            print(f"  not found: {target}")
+
+    # write replaced targets to a file for artifact upload/debugging
+    try:
+        outdir = REPO_ROOT / 'tmp_patched_jsonffi'
+        outdir.mkdir(parents=True, exist_ok=True)
+        with open(outdir / 'attempted_targets.txt', 'w') as fh:
+            fh.write('\n'.join(attempted_targets) + '\n')
+    except Exception:
+        pass
+
+    if replaced_targets:
+        try:
+            outdir = REPO_ROOT / 'tmp_patched_jsonffi'
+            outdir.mkdir(parents=True, exist_ok=True)
+            with open(outdir / 'patched_targets.txt', 'w') as fh:
+                fh.write('\n'.join(replaced_targets) + '\n')
+            for t in replaced_targets:
+                shutil.copy2(t, outdir / ('installed-' + Path(t).name))
+            print(f"  🗂 Wrote patched target info and copies to: {outdir}")
+        except Exception as e:
+            print(f"  ❌ Failed to write patched target copies: {e}")
+    if not replaced:
+        print("⚠️ Could not find an installed mlc_llm cpp/json_ffi/json_ffi_engine.cc in site-packages.")
+        print("   This runner may not have mlc-llm installed yet or uses a different layout.")
+        print("   Attempting to apply patch into local 'mlc-llm-source' checkout if present...")
+        local_source_dir = REPO_ROOT / 'mlc-llm-source' / 'cpp' / 'json_ffi'
+        try:
+            if local_source_dir.exists():
+                local_target = local_source_dir / 'json_ffi_engine.cc'
+                shutil.copy2(LOCAL_SRC, local_target)
+                print(f"  ✅ Copied patch into local mlc-llm-source at: {local_target}")
+                # write patched_targets info for debugging/artifact upload
+                outdir = REPO_ROOT / 'tmp_patched_jsonffi'
+                outdir.mkdir(parents=True, exist_ok=True)
+                with open(outdir / 'patched_targets.txt', 'w') as fh:
+                    fh.write(str(local_target) + '\n')
+                shutil.copy2(local_target, outdir / ('installed-' + Path(local_target).name))
+                print(f"  🗂 Wrote patched target info and copy to: {outdir}")
+                # Verify marker in the local copy
+                marker = 'jsonffi_contains_replacement'
+                with open(local_target, 'r') as f:
+                    content = f.read()
+                if marker in content:
+                    print(f"🔍 Verification OK: marker '{marker}' found in local mlc-llm-source {local_target}")
+                    return 0
+                else:
+                    print(f"⚠️ Marker '{marker}' not found in local copy {local_target}; please inspect the source.")
+                    return 3
+        except Exception as e:
+            print(f"  ❌ Failed to write patch into mlc-llm-source: {e}")
+
+        print("⚠️ Could not apply patch to installed site-packages or local mlc-llm-source. The build may still succeed if compile picks up local sources.")
+        return 1
 
     # write replaced targets to a file for artifact upload/debugging
     if replaced_targets:
