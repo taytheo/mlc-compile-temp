@@ -18,7 +18,7 @@ jobs:
 
     defaults:
       run:
-        shell: bash -el {0}
+        shell: bash -le {0}
 
     steps:
     - name: Checkout
@@ -105,7 +105,17 @@ jobs:
     - name: Verify json_ffi patch applied to site-packages
       run: |
         echo "Searching for installed json_ffi_engine.cc and marker strings..."
-        python3 .github/scripts/verify_jsonffi_patch.py
+        # Run verifier; on failure run diagnostics and fail-fast so we don't compile with an unpatched build
+        if python3 .github/scripts/verify_jsonffi_patch.py; then
+          echo "Verification passed"
+        else
+          echo "ERROR: json_ffi verification failed; collecting diagnostics and failing job"
+          bash .github/scripts/ci_diagnostics.sh || true
+          echo "Listing tmp_patched_jsonffi content (if any):"
+          ls -la tmp_patched_jsonffi || true
+          echo "Uploading diagnostics will occur in later steps via upload-artifact steps"
+          exit 1
+        fi
 
     - name: Show patched json_ffi copies (if any)
       run: |
@@ -153,6 +163,11 @@ jobs:
       run: |
         echo "mlc_llm package info and json_ffi sources (top results only)"
         python3 .github/scripts/debug_mlc_llm_package.py
+
+    - name: Test local mlc_llm import (verifies PYTHONPATH / editable install)
+      run: |
+        echo "Running import tests to ensure the patched source or installed package can be imported"
+        bash .github/scripts/test_local_mlc_llm_import.sh
 
     - name: Compile for iPhone (with debug-dump, prefer local source)
       run: |
