@@ -17,12 +17,26 @@ echo "Searching /tmp and ~/.cache for object files containing marker..."
 find /tmp ~/.cache -type f -name '*.o' -print 2>/dev/null || true | while read -r f; do
   if strings "$f" | egrep -i "MLCJSONFFIEngineForceLink_v1|jsonffi_contains_replacement" >/dev/null; then
     echo "FOUND marker in $f"
-    mkdir -p tmp_ci_diagnostics/objects
+    mkdir -p tmp_ci_diagnostics/objects tmp_ci_diagnostics/snippets
     cp "$f" tmp_ci_diagnostics/objects/ || true
     strings "$f" | egrep -i "MLCJSONFFIEngineForceLink_v1|jsonffi_contains_replacement" -n > "tmp_ci_diagnostics/snippets/$(basename "$f").txt" || true
   fi
 done || true
 
+# Also copy any found_objs.txt or known output artifacts for context
+for p in output found_objs.txt tmp_patched_jsonffi compile_log.txt; do
+  if [ -e "$p" ]; then
+    mkdir -p tmp_ci_diagnostics/outputs
+    cp -R "$p" tmp_ci_diagnostics/outputs/ || true
+  fi
+done
+
+# If there are object files in the workspace output dir, capture snippet context
+if [ -d output ]; then
+  find output -type f -name '*.o' -print | while read -r f; do
+    strings "$f" | egrep -i "MLCJSONFFIEngineForceLink_v1|jsonffi_contains_replacement" -n > "tmp_ci_diagnostics/snippets/$(basename "$f").txt" || true
+  done
+fi
 echo "Searching workspace for json_ffi_engine.cc and copying candidates..."
 find . -type f -name 'json_ffi_engine.cc' -print | while read -r p; do
   dest="tmp_ci_diagnostics/sources/$(echo "$p" | sed 's#/#_##g' | sed 's#^\.##')"
