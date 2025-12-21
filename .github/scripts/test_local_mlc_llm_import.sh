@@ -48,6 +48,15 @@ fi
 
 if [ "$IMPORT_OK" -eq 0 ]; then
   echo "ERROR: Could not import mlc_llm from local source using tried PYTHONPATH variants; aborting"
+  echo "Listing potential mlc_llm installs from sys.path candidates:"
+  python - <<'PY' || true
+import site, pkgutil, sys
+for p in site.getsitepackages():
+    print('site-packages:', p)
+    import os
+    if os.path.isdir(os.path.join(p, 'mlc_llm')):
+        print('  found mlc_llm in', os.path.join(p, 'mlc_llm'))
+PY
   exit 1
 fi
 
@@ -56,3 +65,9 @@ echo "Import test passed; proceeding to compile with local source if available."
 # Ensure helper deps still installed
 pip install huggingface_hub || true
 pip show mlc-llm || true
+
+# If editable install exists, show it
+if pip show -f mlc-llm 2>/dev/null | grep -q 'Location'; then
+  echo "mlc-llm installed location and files:"
+  pip show -f mlc-llm 2>/dev/null || true
+fi
