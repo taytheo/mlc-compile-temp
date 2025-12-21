@@ -31,6 +31,13 @@ for p in output found_objs.txt tmp_patched_jsonffi compile_log.txt; do
   fi
 done
 
+# Include any CI fallback object if created
+if [ -d output/ci_fallback ]; then
+  mkdir -p tmp_ci_diagnostics/outputs/ci_fallback
+  cp -R output/ci_fallback/* tmp_ci_diagnostics/outputs/ci_fallback/ || true
+fi
+
+
 # If there are object files in the workspace output dir, capture snippet context
 if [ -d output ]; then
   find output -type f -name '*.o' -print | while read -r f; do
