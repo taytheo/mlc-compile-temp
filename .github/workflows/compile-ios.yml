@@ -169,6 +169,32 @@ jobs:
         echo "Running import tests to ensure the patched source or installed package can be imported"
         bash .github/scripts/test_local_mlc_llm_import.sh
 
+    - name: Inject compile postprocess into mlc-llm-source (if present)
+      run: |
+        echo "Injecting compile postprocess snippet into mlc-llm-source (if present)"
+        if [ -d mlc-llm-source ]; then
+          mkdir -p mlc-llm-source/python/mlc_llm/interface
+          if [ -f .github/patches/compile_postprocess_snippet.py ]; then
+            target=mlc-llm-source/python/mlc_llm/interface/compile.py
+            if [ -f "$target" ]; then
+              if ! grep -q "Appended iOS static libs to" "$target"; then
+                echo >> "$target"
+                cat .github/patches/compile_postprocess_snippet.py >> "$target"
+                echo "Appended postprocess snippet into $target"
+              else
+                echo "Postprocess snippet already present in $target"
+              fi
+            else
+              cp .github/patches/compile_postprocess_snippet.py "$target"
+              echo "Wrote new compile.py to $target"
+            fi
+          else
+            echo "No .github/patches/compile_postprocess_snippet.py present; skipping injection"
+          fi
+        else
+          echo "mlc-llm-source not present; skipping inject"
+        fi
+
     - name: Compile for iPhone (with debug-dump, prefer local source)
       run: |
         mkdir -p output tmp_debug_dump
