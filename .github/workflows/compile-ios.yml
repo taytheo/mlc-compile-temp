@@ -169,48 +169,34 @@ jobs:
         echo "Running import tests to ensure the patched source or installed package can be imported"
         bash .github/scripts/test_local_mlc_llm_import.sh
 
-    - name: Inject compile postprocess into mlc-llm-source (if present)
+    - name: Build & append iOS static libs to model tar (post-compile)
+      if: always()
       run: |
-        echo "Injecting compile postprocess snippet into mlc-llm-source (if present)"
+        echo "Attempting to build iOS static libs and append to model tar (best-effort)"
         if [ -d mlc-llm-source ]; then
-          mkdir -p mlc-llm-source/python/mlc_llm/interface
-          if [ -f .github/patches/compile_postprocess_snippet.py ]; then
-            target=mlc-llm-source/python/mlc_llm/interface/compile.py
-            if [ -f "$target" ]; then
-              echo "Attempting to insert postprocess into existing $target"
-              echo "Attempting to insert postprocess into existing $target"
-              # Insert a small exec-based postprocess call after the compile call so it runs inside the function scope
-              awk '
-              {
-                print;
-                if (!done && $0 ~ /args\.display\(\)/) {
-                  getline next
-                  print next
-                  if (next ~ /_compile\(args, model_config\)/) {
-                    print ""
-                    print "    # CI_POSTPROCESS_INJECTED: run postprocess snippet (best-effort)"
-                    print "    try:"
-                    print "        from pathlib import Path"
-                    print "        import logging, subprocess, tarfile"
-                    print "        patch = Path(__file__).resolve().parents[2] / \".github\" / \"patches\" / \"compile_postprocess_snippet.py\""
-                    print "        if patch.exists():"
-                    print "            exec(patch.read_text(), globals(), locals())"
-                    print "    except Exception as e:"
-                    print "        logging.warning(\"CI postprocess failed: %s\", e)"
-                    done=1
-                  }
-                }
-              }' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
-              echo "Inserted CI postprocess into $target"
-            else
-              echo "Wrote new compile.py to $target"
-              cp .github/patches/compile_postprocess_snippet.py "$target"
-            fi
+          echo "Running ios/prepare_libs.sh"
+          bash mlc-llm-source/ios/prepare_libs.sh || echo "prepare_libs.sh failed, continuing"
+          if [ -d mlc-llm-source/build/lib ]; then
+            echo "Appending built libs to output/model-iphone.tar"
+            for f in mlc-llm-source/build/lib/*; do
+              [ -f "$f" ] || continue
+              echo "  adding $f"
+              tar -rf output/model-iphone.tar -C "$(dirname "$f")" "$(basename "$f")" || echo "failed to add $f"
+            done
+            echo "Tar contents after append:"
+            tar -tf output/model-iphone.tar | sed -n '1,200p' || true
+            echo "Checking added libs for marker strings"
+            for lib in mlc-llm-source/build/lib/*; do
+              [ -f "$lib" ] || continue
+              echo "Inspecting $lib"
+              strings "$lib" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n || true
+              nm -g "$lib" 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi' -n || true
+            done
           else
-            echo "No .github/patches/compile_postprocess_snippet.py present; skipping injection"
+            echo "No built iOS libs found at mlc-llm-source/build/lib; skipping append"
           fi
         else
-          echo "mlc-llm-source not present; skipping inject"
+          echo "mlc-llm-source not present; skipping iOS lib build/append"
         fi
 
     - name: Compile for iPhone (with debug-dump, prefer local source)
