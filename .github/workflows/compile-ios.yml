@@ -235,6 +235,25 @@ jobs:
             echo "No marker in $f"
           fi
         done
+        # Also inspect any included static libs under output/lib
+        if [ -d output/lib ]; then
+          echo "Inspecting static libs under output/lib"
+          for libf in $(find output/lib -type f -name '*.a' -o -name '*.dylib' -o -name '*.so' -print); do
+            echo "Inspecting static lib: $libf"
+            if nm -g "$libf" 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi' >/dev/null; then
+              echo "FOUND public symbol in $libf"
+              nm -g "$libf" 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi' || true
+            else
+              echo "No public symbol for jsonffi found in $libf"
+            fi
+            if strings "$libf" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n >/dev/null; then
+              echo "FOUND marker string in $libf"
+              strings "$libf" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n || true
+            else
+              echo "No marker string in $libf"
+            fi
+          done
+        fi
         echo "Searching typical tmp/build dirs for marker strings (may be slow)"
         find /tmp -type f -name '*.o' -print -exec sh -c "strings '{}' | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n && echo 'FOUND in {}'" \; || true
 
