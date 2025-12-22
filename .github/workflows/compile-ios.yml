@@ -75,7 +75,15 @@ jobs:
         if [ -d mlc-llm-source ]; then
           echo "Cloned mlc-llm into mlc-llm-source"
           mkdir -p mlc-llm-source/cpp/json_ffi
-          cp .github/patches/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
+          if [ -f mlc-llm/cpp/json_ffi/json_ffi_engine.cc ]; then
+            echo "Using workspace mlc-llm/cpp/json_ffi/json_ffi_engine.cc as source patch" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            cp mlc-llm/cpp/json_ffi/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
+          elif [ -f .github/patches/json_ffi_engine.cc ]; then
+            echo "Using .github/patches/json_ffi_engine.cc as source patch" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            cp .github/patches/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
+          else
+            echo "No local patch found to copy into mlc-llm-source" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          fi
           echo "--- head of patched file ---"
           head -n 80 mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
           # ensure marker symbol exists in the local source; if missing, append a minimal force-link constant (via helper script)
