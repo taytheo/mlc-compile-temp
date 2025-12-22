@@ -177,7 +177,10 @@ jobs:
         if [ -d mlc-llm-source ]; then
           echo "Running ios/prepare_libs.sh from mlc-llm-source/ios (logs -> tmp_ci_diagnostics/outputs/prepare_libs.log)"
           pushd mlc-llm-source/ios >/dev/null 2>&1 || true
-          bash ./prepare_libs.sh > ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          export MLC_LLM_SOURCE_DIR="$(pwd)/.."
+          echo "Using MLC_LLM_SOURCE_DIR=$MLC_LLM_SOURCE_DIR" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          # run prepare with explicit source dir environment to avoid cmake source dir confusion
+          MLC_LLM_SOURCE_DIR="$MLC_LLM_SOURCE_DIR" bash ./prepare_libs.sh > ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
           echo "prepare_libs.sh exit code: $?" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           popd >/dev/null 2>&1 || true
           echo "Listing mlc-llm-source/ios/build/lib (if any):" > tmp_ci_diagnostics/outputs/build_lib_list.txt || true
