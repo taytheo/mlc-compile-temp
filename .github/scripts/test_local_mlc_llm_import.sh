@@ -18,18 +18,16 @@ if [ -d mlc-llm-source/python ]; then
 fi
 
 # If tvm python exists in submodule, try to install it so imports succeed during tests
-if [ -d mlc-llm-source/3rdparty/tvm/python ]; then
-  echo "Attempting to install TVM python from mlc-llm-source/3rdparty/tvm/python" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-  pip install -e ./mlc-llm-source/3rdparty/tvm/python >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-  # verify tvm import
-  python - <<'PY' >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+# Try installing TVM via several strategies (PyPI names, mlc.ai wheels, submodule)
+.github/scripts/install_tvm_wheel.sh ../../tmp_ci_diagnostics/outputs/prepare_libs.log >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+# verify tvm import
+python - <<'PY' >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
 try:
     import tvm
     print('tvm import OK:', getattr(tvm, '__file__', 'no-file'))
 except Exception as e:
     print('tvm import FAIL:', e)
 PY
-fi
 
 echo "-- Trying to import mlc_llm with various PYTHONPATHs --"
 PY_VARIANTS=( "." "./mlc-llm-source" "./mlc-llm-source/src" "./mlc-llm-source/python" "./mlc-llm-source/python/src" "./mlc-llm-source/src/python" )
