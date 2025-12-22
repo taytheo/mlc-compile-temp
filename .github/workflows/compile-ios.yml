@@ -58,7 +58,12 @@ jobs:
 
         # Also clone the repository as a source fallback and copy the patch into it
         rm -rf mlc-llm-source || true
+        # Clone mlc-llm and initialize submodules (tvm, tokenizers-cpp etc.)
         git clone --depth 1 https://github.com/mlc-ai/mlc-llm.git mlc-llm-source || true
+        if [ -d mlc-llm-source ]; then
+          echo "Initializing submodules (recursive) in mlc-llm-source"
+          git -C mlc-llm-source submodule update --init --recursive || true
+        fi
         if [ -d mlc-llm-source ]; then
           echo "Cloned mlc-llm into mlc-llm-source"
           mkdir -p mlc-llm-source/cpp/json_ffi
