@@ -54,7 +54,7 @@ jobs:
         pip install huggingface_hub || true
 
         # Run patcher against installed site-packages (if present)
-        python3 .github/scripts/patch_jsonffi_repl.py || true
+        python3 .github/scripts/patch_jsonffi_repl_fixed.py || true
 
         # Also clone the repository as a source fallback and copy the patch into it
         rm -rf mlc-llm-source || true
@@ -105,7 +105,7 @@ jobs:
         ls -la .github/patches || true
         echo "--- Debug: head of patch file ---"
         sed -n '1,120p' .github/patches/json_ffi_engine.cc || true
-        python3 .github/scripts/patch_jsonffi_repl.py
+        python3 .github/scripts/patch_jsonffi_repl_fixed.py
 
     - name: Upload patched json_ffi copies for debugging
       uses: actions/upload-artifact@v4
