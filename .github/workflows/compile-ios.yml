@@ -175,11 +175,13 @@ jobs:
         echo "Attempting to build iOS static libs and append to model tar (best-effort)"
         mkdir -p tmp_ci_diagnostics/outputs
         if [ -d mlc-llm-source ]; then
-          echo "Running ios/prepare_libs.sh (logs -> tmp_ci_diagnostics/outputs/prepare_libs.log)"
-          bash mlc-llm-source/ios/prepare_libs.sh > tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-          echo "prepare_libs.sh exit code: $?" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          echo "Listing mlc-llm-source/build/lib (if any):" > tmp_ci_diagnostics/outputs/build_lib_list.txt || true
-          ls -la mlc-llm-source/build/lib >> tmp_ci_diagnostics/outputs/build_lib_list.txt 2>&1 || true
+          echo "Running ios/prepare_libs.sh from mlc-llm-source/ios (logs -> tmp_ci_diagnostics/outputs/prepare_libs.log)"
+          pushd mlc-llm-source/ios >/dev/null 2>&1 || true
+          bash ./prepare_libs.sh > ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "prepare_libs.sh exit code: $?" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          popd >/dev/null 2>&1 || true
+          echo "Listing mlc-llm-source/ios/build/lib (if any):" > tmp_ci_diagnostics/outputs/build_lib_list.txt || true
+          ls -la mlc-llm-source/ios/build/lib >> tmp_ci_diagnostics/outputs/build_lib_list.txt 2>&1 || true
 
           if [ -d mlc-llm-source/build/lib ]; then
             echo "Appending built libs to output/model-iphone.tar"
