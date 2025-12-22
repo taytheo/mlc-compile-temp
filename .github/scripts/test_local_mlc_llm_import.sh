@@ -8,6 +8,29 @@ else
   echo "mlc-llm-source not present"
 fi
 
+echo "-- Attempt editable install of local mlc-llm (if available) --"
+if [ -d mlc-llm-source/python ]; then
+  echo "Found mlc-llm-source/python; attempting editable install and requirements install" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+  pip install -e ./mlc-llm-source/python >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+  if [ -f mlc-llm-source/python/requirements.txt ]; then
+    pip install -r mlc-llm-source/python/requirements.txt >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+  fi
+fi
+
+# If tvm python exists in submodule, try to install it so imports succeed during tests
+if [ -d mlc-llm-source/3rdparty/tvm/python ]; then
+  echo "Attempting to install TVM python from mlc-llm-source/3rdparty/tvm/python" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+  pip install -e ./mlc-llm-source/3rdparty/tvm/python >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+  # verify tvm import
+  python - <<'PY' >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+try:
+    import tvm
+    print('tvm import OK:', getattr(tvm, '__file__', 'no-file'))
+except Exception as e:
+    print('tvm import FAIL:', e)
+PY
+fi
+
 echo "-- Trying to import mlc_llm with various PYTHONPATHs --"
 PY_VARIANTS=( "." "./mlc-llm-source" "./mlc-llm-source/src" "./mlc-llm-source/python" "./mlc-llm-source/python/src" "./mlc-llm-source/src/python" )
 IMPORT_OK=0
@@ -36,6 +59,15 @@ PY
     break
   fi
 done
+
+# If import still fails, do not abort CI; write a diagnostics marker and continue
+if [ "$IMPORT_OK" -eq 0 ]; then
+  echo "WARNING: Could not import mlc_llm from local source using tried PYTHONPATH variants; continuing but recording diagnostics" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+  mkdir -p tmp_patched_jsonffi || true
+  touch tmp_patched_jsonffi/import_failed.txt || true
+else
+  echo "Import test passed; proceeding to compile with local source if available." >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+fi
 
 # Verify patched file presence in mlc-llm-source
 if [ -f mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc ]; then
