@@ -202,6 +202,8 @@ jobs:
             echo "Copied .github/patches/json_ffi_engine.cc to $MLC_LLM_SOURCE_DIR/cpp/json_ffi/" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           fi
           if [ -f "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" ]; then
+            echo "Dumping head of json_ffi_engine.cc to diagnostics" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            head -n 240 "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" > ../../tmp_ci_diagnostics/outputs/json_ffi_head.txt || true
             echo "Checking syntax of json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             if ! c++ -fsyntax-only -x c++ "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
               echo "FATAL: json_ffi_engine.cc has syntax errors after replacement. Dumping file below:" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
@@ -246,6 +248,10 @@ jobs:
             tail -n 200 ../../tmp_ci_diagnostics/outputs/ninja_verbose.txt >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             echo "Listing build directory" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             ls -la build >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            echo "Dumping object files that failed or are large" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            find build -name '*.o' -type f -exec stat -f '%z %N' {} \; | sort -nr | head -n 50 >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            # attempt to find last failed compile command from ninja verbose
+            grep -n "error:" -n ../../tmp_ci_diagnostics/outputs/ninja_verbose.txt | tail -n 50 >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             # Fail the job so we can see the error in GitHub UI
             echo "Exiting due to build failure" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             exit 2
@@ -263,10 +269,11 @@ jobs:
 
           popd >/dev/null 2>&1 || true
 
-          echo "Listing mlc-llm-source/ios/build/lib (if any):" > tmp_ci_diagnostics/outputs/build_lib_list.txt || true
-          ls -la mlc-llm-source/ios/build/lib >> tmp_ci_diagnostics/outputs/build_lib_list.txt 2>&1 || true
+          BUILD_LIB_DIR="mlc-llm-source/ios/build/lib"
+          echo "Listing $BUILD_LIB_DIR (if any):" > tmp_ci_diagnostics/outputs/build_lib_list.txt || true
+          ls -la "$BUILD_LIB_DIR" >> tmp_ci_diagnostics/outputs/build_lib_list.txt 2>&1 || true
 
-          if [ -d mlc-llm-source/build/lib ]; then
+          if [ -d "$BUILD_LIB_DIR" ]; then
             echo "Appending built libs to output/model-iphone.tar"
             for f in mlc-llm-source/build/lib/*; do
               [ -f "$f" ] || continue
@@ -310,11 +317,6 @@ jobs:
               echo "Marker found in added libs; no fallback needed" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
             fi
           fi
-        else
-          echo "mlc-llm-source not present; skipping iOS lib build/append" > tmp_ci_diagnostics/outputs/build_lib_list.txt
-        fi
-        echo "Copying diagnostics to tmp_ci_diagnostics for upload"
-        ls -la tmp_ci_diagnostics || true
         else
           echo "mlc-llm-source not present; skipping iOS lib build/append" > tmp_ci_diagnostics/outputs/build_lib_list.txt
         fi
