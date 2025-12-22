@@ -210,7 +210,8 @@ jobs:
             -DMLC_LLM_INSTALL_STATIC_LIB=ON \
             -DUSE_METAL=ON \
             -DTVM_FFI_USE_LIBBACKTRACE=OFF \
-            -DTVM_FFI_BACKTRACE_ON_SEGFAULT=OFF >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            -DTVM_FFI_BACKTRACE_ON_SEGFAULT=OFF \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
 
           echo "CMake exit code: $?" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
 
