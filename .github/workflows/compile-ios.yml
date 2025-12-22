@@ -236,12 +236,30 @@ jobs:
 
           echo "Building mlc_llm_static" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           # Build the static target and fail on error
-          cmake --build build --config Release --target mlc_llm_static -j >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1
-          echo "Build exit code: $?" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          # Build the static target with verbose diagnostics on failure
+          if cmake --build build --config Release --target mlc_llm_static -j >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
+            echo "Build succeeded" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          else
+            echo "Build FAILED; collecting verbose ninja output and last 500 lines of log" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            ninja -C build -v > ../../tmp_ci_diagnostics/outputs/ninja_verbose.txt 2>&1 || true
+            echo "--- ninja verbose (tail 200) ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            tail -n 200 ../../tmp_ci_diagnostics/outputs/ninja_verbose.txt >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            echo "Listing build directory" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            ls -la build >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            # Fail the job so we can see the error in GitHub UI
+            echo "Exiting due to build failure" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            exit 2
+          fi
 
           echo "Installing (cmake --build install)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          cmake --build build --target install --config Release -j >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1
-          echo "Install exit code: $?" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          if cmake --build build --target install --config Release -j >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
+            echo "Install succeeded" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          else
+            echo "Install FAILED; collecting verbose ninja output" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            ninja -C build -v > ../../tmp_ci_diagnostics/outputs/ninja_verbose_install.txt 2>&1 || true
+            tail -n 200 ../../tmp_ci_diagnostics/outputs/ninja_verbose_install.txt >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            exit 2
+          fi
 
           popd >/dev/null 2>&1 || true
 
