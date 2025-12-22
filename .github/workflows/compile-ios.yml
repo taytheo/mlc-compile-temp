@@ -195,6 +195,31 @@ jobs:
           echo "Installing rust target aarch64-apple-ios (if not present)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           rustup target add aarch64-apple-ios >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
 
+          echo "Running a quick C++ syntax check on json_ffi source (and replace if invalid)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          if [ -f "$MLC_LLM_SOURCE_DIR/../cpp/json_ffi/json_ffi_engine.cc" ]; then
+            echo "Checking $MLC_LLM_SOURCE_DIR/../cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            c++ -fsyntax-only -x c++ "$MLC_LLM_SOURCE_DIR/../cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            if [ $? -ne 0 ]; then
+              echo "Syntax errors detected in json_ffi_engine.cc; attempting to replace from .github/patches/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              if [ -f .github/patches/json_ffi_engine.cc ]; then
+                cp .github/patches/json_ffi_engine.cc "$MLC_LLM_SOURCE_DIR/../cpp/json_ffi/json_ffi_engine.cc" || true
+                echo "Replacement performed; re-checking syntax" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+                c++ -fsyntax-only -x c++ "$MLC_LLM_SOURCE_DIR/../cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+                if [ $? -ne 0 ]; then
+                  echo "json_ffi_engine.cc still has syntax errors after replacement" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+                else
+                  echo "json_ffi_engine.cc now passes syntax check" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+                fi
+              else
+                echo "No .github/patches/json_ffi_engine.cc present to replace" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              fi
+            else
+              echo "json_ffi_engine.cc syntax check passed" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            fi
+          else
+            echo "json_ffi_engine.cc not present in mlc-llm-source; skipping syntax check" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          fi
+
           echo "Running cmake (explicit -S/-B)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           cmake -G Ninja -S "$MLC_LLM_SOURCE_DIR" -B build \
             -DCMAKE_BUILD_TYPE=Release \
