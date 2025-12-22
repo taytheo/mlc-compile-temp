@@ -61,8 +61,16 @@ jobs:
         # Clone mlc-llm and initialize submodules (tvm, tokenizers-cpp etc.)
         git clone --depth 1 https://github.com/mlc-ai/mlc-llm.git mlc-llm-source || true
         if [ -d mlc-llm-source ]; then
-          echo "Initializing submodules (recursive) in mlc-llm-source"
-          git -C mlc-llm-source submodule update --init --recursive || true
+          echo "Initializing submodules (recursive) in mlc-llm-source (shallow preferred)"
+          git -C mlc-llm-source submodule update --init --recursive --depth 1 || true
+          # Verify critical CMake files exist; if not, do a full submodule fetch
+          if [ ! -f mlc-llm-source/3rdparty/tvm/CMakeLists.txt ] || [ ! -f mlc-llm-source/3rdparty/tokenizers-cpp/CMakeLists.txt ]; then
+            echo "Critical submodules missing CMakeLists; performing full submodule update"
+            git -C mlc-llm-source submodule sync --recursive || true
+            git -C mlc-llm-source submodule update --init --recursive || true
+          fi
+          echo "Submodules list:" > tmp_ci_diagnostics/outputs/submodules_list.txt || true
+          ls -la mlc-llm-source/3rdparty >> tmp_ci_diagnostics/outputs/submodules_list.txt 2>&1 || true
         fi
         if [ -d mlc-llm-source ]; then
           echo "Cloned mlc-llm into mlc-llm-source"
