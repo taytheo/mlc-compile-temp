@@ -196,23 +196,17 @@ jobs:
           rustup target add aarch64-apple-ios >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
 
           echo "Running a quick C++ syntax check on json_ffi source (and replace if invalid)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          echo "Forcing replacement of json_ffi_engine.cc from repository patch (if present)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          if [ -f .github/patches/json_ffi_engine.cc ]; then
+            cp .github/patches/json_ffi_engine.cc "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            echo "Copied .github/patches/json_ffi_engine.cc to $MLC_LLM_SOURCE_DIR/cpp/json_ffi/" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          fi
           if [ -f "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" ]; then
-            echo "Checking $MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            c++ -fsyntax-only -x c++ "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            if [ $? -ne 0 ]; then
-              echo "Syntax errors detected in json_ffi_engine.cc; attempting to replace from .github/patches/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-              if [ -f .github/patches/json_ffi_engine.cc ]; then
-                cp .github/patches/json_ffi_engine.cc "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" || true
-                echo "Replacement performed; re-checking syntax" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-                c++ -fsyntax-only -x c++ "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-                if [ $? -ne 0 ]; then
-                  echo "json_ffi_engine.cc still has syntax errors after replacement" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-                else
-                  echo "json_ffi_engine.cc now passes syntax check" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-                fi
-              else
-                echo "No .github/patches/json_ffi_engine.cc present to replace" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-              fi
+            echo "Checking syntax of json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            if ! c++ -fsyntax-only -x c++ "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
+              echo "FATAL: json_ffi_engine.cc has syntax errors after replacement. Dumping file below:" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              sed -n '1,240p' "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              exit 2
             else
               echo "json_ffi_engine.cc syntax check passed" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             fi
@@ -241,11 +235,12 @@ jobs:
           echo "CMake exit code: $?" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
 
           echo "Building mlc_llm_static" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          cmake --build build --config Release --target mlc_llm_static -j >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          # Build the static target and fail on error
+          cmake --build build --config Release --target mlc_llm_static -j >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1
           echo "Build exit code: $?" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
 
           echo "Installing (cmake --build install)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          cmake --build build --target install --config Release -j >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          cmake --build build --target install --config Release -j >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1
           echo "Install exit code: $?" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
 
           popd >/dev/null 2>&1 || true
