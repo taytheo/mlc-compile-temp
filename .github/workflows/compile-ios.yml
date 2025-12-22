@@ -78,16 +78,15 @@ jobs:
           cp .github/patches/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
           echo "--- head of patched file ---"
           head -n 80 mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
-          if grep -q "MLCJSONFFIEngineForceLink_v1" mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc; then
-            echo "Marker present in local source"
+          # ensure marker symbol exists in the local source; if missing, append a minimal force-link constant (via helper script)
+          if [ -f mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc ]; then
+            .github/scripts/ensure_force_link_marker.sh mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           else
-            echo "Marker not present in local source"
+            echo "mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc not found; skipping marker append" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           fi
         else
-          echo "No local source checkout cloned"
+          echo "No local source checkout cloned" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
         fi
-
-        # Provide visible debug about installed package
         python3 .github/scripts/show_installed_mlc_llm.py || true
 
     - name: Ensure Metal toolchain is available
@@ -218,7 +217,7 @@ jobs:
             echo "json_ffi_engine.cc not present in mlc-llm-source; skipping syntax check" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           fi
 
-          echo "Running cmake (explicit -S/-B)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          echo "Running cmake (explicit -S/-B, export compile commands)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           cmake -G Ninja -S "$MLC_LLM_SOURCE_DIR" -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_NAME=iOS \
@@ -234,9 +233,16 @@ jobs:
             -DUSE_METAL=ON \
             -DTVM_FFI_USE_LIBBACKTRACE=OFF \
             -DTVM_FFI_BACKTRACE_ON_SEGFAULT=OFF \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
 
           echo "CMake exit code: $?" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+
+          # If compile_commands.json present, run a real compile-only syntax check using its exact command for json_ffi_engine.cc
+          if [ -f build/compile_commands.json ]; then
+            echo "Found compile_commands.json; running exact syntax check for json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            python3 .github/scripts/run_compile_syntax_check.py >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          fi
 
           echo "Building mlc_llm_static" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           # Build the static target and fail on error
