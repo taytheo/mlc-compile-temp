@@ -248,8 +248,22 @@ jobs:
               fi
             done
           else
-            echo "No built iOS libs found at mlc-llm-source/build/lib; skipping append" > tmp_ci_diagnostics/outputs/build_lib_list.txt
-          fi
+            echo "No built iOS libs found at mlc-llm-source/build/lib; skipping append" > tmp_ci_diagnostics/outputs/build_lib_list.txt            # Fallback: compile a small force-link object for aarch64-apple-ios and append to tar
+            echo "Attempting fallback: compile ci_force_link_jsonffi.c for iOS target" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            mkdir -p output/ci_fallback tmp_ci_diagnostics/outputs/ci_fallback || true
+            SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+            clang -target aarch64-apple-ios -isysroot "$SDKROOT" -c .github/patches/ci_force_link_jsonffi.c -o output/ci_fallback/ci_force_link_jsonffi.o 2>> tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            if [ -f output/ci_fallback/ci_force_link_jsonffi.o ]; then
+              echo "Fallback object compiled, adding to tar and diagnostics" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              tar -rf output/model-iphone.tar -C output/ci_fallback ci_force_link_jsonffi.o || echo "failed to add fallback to tar" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              cp output/ci_fallback/ci_force_link_jsonffi.o tmp_ci_diagnostics/outputs/ci_fallback/ || true
+              echo "strings on fallback object:" >> tmp_ci_diagnostics/outputs/ci_fallback/strings.txt || true
+              strings output/ci_fallback/ci_force_link_jsonffi.o | egrep -i 'MLCJSONFFIEngineForceLink' -n >> tmp_ci_diagnostics/outputs/ci_fallback/strings.txt || true
+              echo "nm on fallback object:" >> tmp_ci_diagnostics/outputs/ci_fallback/nm.txt || true
+              nm -g output/ci_fallback/ci_force_link_jsonffi.o 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink' -n >> tmp_ci_diagnostics/outputs/ci_fallback/nm.txt || true
+            else
+              echo "Fallback compile failed" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            fi          fi
         else
           echo "mlc-llm-source not present; skipping iOS lib build/append" > tmp_ci_diagnostics/outputs/build_lib_list.txt
         fi
