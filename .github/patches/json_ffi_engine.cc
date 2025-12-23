@@ -7,6 +7,16 @@
 
 #include <filesystem>
 #include <fstream>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <string>
+
+// Optional bridge to iOS shim - no-op on platforms that don't provide
+// mlc_emit_diagnostic. We declare as C symbol so a platform-specific
+// implementation (e.g. mlc_shim.mm) can forward diagnostics to Flutter.
+extern "C" void mlc_emit_diagnostic(const char* json_str);
 
 #include "../serve/model.h"
 #include "../support/json_parser.h"
@@ -18,7 +28,39 @@ namespace json_ffi {
 
 using namespace tvm::runtime;
 
-JSONFFIEngine::JSONFFIEngine() { engine_ = serve::ThreadedEngine::Create(); }
+JSONFFIEngine::JSONFFIEngine() {
+  engine_ = serve::ThreadedEngine::Create();
+  try {
+    EmitPersistentHostDiag(std::string("{""type"":""jsonffi_init"",""message"":""engine_created""}"));
+  } catch (...) {}
+}
+
+// Write a small persistent diagnostic to /tmp and to stderr using POSIX
+// APIs so it will be visible in host-side captures even when higher-level
+// logging paths are missed. Keep this function tiny and failure-tolerant.
+static void EmitPersistentHostDiag(const std::string &json_str) {
+  // Mirror to stderr (best-effort)
+  try {
+    std::string line = std::string("[JSONFFI-HOST] ") + json_str + "\n";
+    // Use low-level write to avoid stdio buffering surprises in some runtimes
+    ssize_t wn = write(STDERR_FILENO, line.data(), line.size());
+    (void)wn;
+  } catch (...) {}
+
+  // Append to a file in /tmp so the runner can always fetch it
+  try {
+    const char *path = "/tmp/mlc_jsonffi_diagnostics.log";
+    int fd = open(path, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    if (fd >= 0) {
+      std::string line = json_str + "\n";
+      ssize_t wn = write(fd, line.data(), line.size());
+      (void)wn;
+      // best-effort flush
+      fsync(fd);
+      close(fd);
+    }
+  } catch (...) {}
+}
 
 bool JSONFFIEngine::ChatCompletion(std::string request_json_str, std::string request_id) {
   bool success = this->AddRequest(request_json_str, request_id);
@@ -130,15 +172,7 @@ bool JSONFFIEngine::AddRequest(std::string request_json_str, std::string request
   for (int i = 0; i < gen_cfg->n; ++i) {
     rstate.streamer.push_back(TextStreamer(tokenizer_));
   }
-  // Avoid copy-assignable requirement for mapped_type (it contains atomics)
-  // Insert a default RequestState and move members to avoid copy-assigning atomics
-  {
-    auto &dst = request_map_[request_id];
-    dst.model = std::move(rstate.model);
-    dst.streamer = std::move(rstate.streamer);
-    dst.stream_seq.store(rstate.stream_seq.load());
-    dst.unconditional_group_diag_count.store(rstate.unconditional_group_diag_count.load());
-  }
+  request_map_[request_id] = std::move(rstate);
 
   this->engine_->AddRequest(engine_request);
   return true;
@@ -195,11 +229,57 @@ class JSONFFIEngineImpl : public JSONFFIEngine, public ffi::ModuleObj {
   }
 
   void Reload(String engine_config_json_str) {
-    this->engine_->Reload(engine_config_json_str);
-    this->default_generation_config_ = this->engine_->GetDefaultGenerationConfig();
-    auto engine_config = this->engine_->GetCompleteEngineConfig();
+    try {
+      this->engine_->Reload(engine_config_json_str);
+      this->default_generation_config_ = this->engine_->GetDefaultGenerationConfig();
+      auto engine_config = this->engine_->GetCompleteEngineConfig();
 
-    // Load conversation template.
+        // Debug: print which model path we're loading so we can correlate on-device
+        // runtime behavior with the packaged model path (helps determine whether
+        // the model config being loaded matches the files in the app bundle).
+        fprintf(stderr, "[JSONFFI] Reload: engine_config.model='%s'\n",
+              engine_config->model.c_str());
+        // Inject a guaranteed EventChannel diagnostic via the shim helper so
+        // we can detect JSONFFI engine reloads in device logs even when other
+        // diagnostic sinks are not captured by the runner.
+        try {
+          std::ostringstream _diag;
+          _diag << "{""type"":""jsonffi_reload"",""model"":""" << engine_config->model << """}";
+          mlc_emit_diagnostic(_diag.str().c_str());
+          extern "C" void mlc_emit_diag_to_token(const char* json_str);
+          mlc_emit_diag_to_token(_diag.str().c_str());
+        } catch (...) {}
+
+        // Also emit a diagnostic listing files present under the model path so we
+        // can quickly detect missing shard files or incorrect paths when running
+        // on-device (helps rule out asset packaging problems).
+        try {
+          std::filesystem::path model_path(engine_config->model);
+          picojson::array files_json;
+          if (std::filesystem::exists(model_path)) {
+            if (std::filesystem::is_directory(model_path)) {
+              for (auto &p : std::filesystem::directory_iterator(model_path)) {
+                files_json.push_back(picojson::value(std::string(p.path().filename())));
+              }
+            } else {
+              files_json.push_back(picojson::value(model_path.filename().string()));
+            }
+          } else {
+            files_json.push_back(picojson::value(std::string("(missing)")));
+          }
+          picojson::object model_files_diag;
+          model_files_diag["type"] = picojson::value(std::string("model_files_listing"));
+          model_files_diag["modelPath"] = picojson::value(engine_config->model);
+          model_files_diag["files"] = picojson::value(files_json);
+          std::string model_files_diag_str = picojson::value(model_files_diag).serialize();
+          mlc_emit_diagnostic(model_files_diag_str.c_str());
+          // Persist a copy for host-side debugging and correlation
+          EmitPersistentHostDiag(model_files_diag_str);
+        } catch (...) {
+          // ignore any errors during diagnostics emission
+        }
+
+        // Load conversation template.
     Result<picojson::object> model_config_json =
         serve::Model::LoadModelConfig(engine_config->model);
     CHECK(model_config_json.IsOk()) << model_config_json.UnwrapErr();
@@ -209,107 +289,32 @@ class JSONFFIEngineImpl : public JSONFFIEngine, public ffi::ModuleObj {
     CHECK(!conv_template.IsErr()) << "Invalid conversation template JSON: "
                                   << conv_template.UnwrapErr();
     this->conv_template_ = conv_template.Unwrap();
-    this->model_config_ = ModelConfig::FromJSON(
-        json::Lookup<picojson::object>(model_config_json_unwrapped, "model_config"));
-    this->tokenizer_ = Tokenizer::FromPath(engine_config->model);
-  }
-
-  void Unload() { this->engine_->Unload(); }
-
-  void Reset() { this->engine_->Reset(); }
-
-  void RunBackgroundLoop() { this->engine_->RunBackgroundLoop(); }
-
-  void RunBackgroundStreamBackLoop() { this->engine_->RunBackgroundStreamBackLoop(); }
-
-  String GetResponseFromStreamOutput(Array<RequestStreamOutput> delta_outputs) {
-    picojson::array json_response_arr;
-    for (const auto& delta_output : delta_outputs) {
-      std::string request_id = delta_output->request_id;
-      auto request_state_it = request_map_.find(request_id);
-      if (request_state_it == request_map_.end()) continue;
-      RequestState& rstate = request_state_it->second;
-
-      // build the final usage messages
-      // invariant, we can always let other messages to come first
-      // then the final usage messages, as final usage is always last
-      if (delta_output->request_final_usage_json_str.has_value()) {
-        ChatCompletionStreamResponse response;
-        response.id = request_id;
-        response.model = rstate.model;
-        response.system_fingerprint = "";
-        std::string usage_json_str = delta_output->request_final_usage_json_str.value();
-        picojson::value usage_json;
-        std::string err = picojson::parse(usage_json, usage_json_str);
-        if (!err.empty()) {
-          err_ = err;
-        } else {
-          response.usage = usage_json;
-        }
-        json_response_arr.push_back(picojson::value(response.AsJSON()));
-        request_map_.erase(request_state_it);
-        continue;
+    // Debug: print conv_template.roles contents to help diagnose "user" role problems
+    try {
+      std::ostringstream _ss_roles;
+      _ss_roles << "[JSONFFI] conv_template.roles size=" << this->conv_template_.roles.size()
+                << " keys=";
+      bool _first = true;
+      picojson::array role_keys;
+      for (const auto &kv : this->conv_template_.roles) {
+        if (!_first) _ss_roles << ',';
+        _ss_roles << kv.first;
+        _first = false;
+        role_keys.push_back(picojson::value(kv.first));
       }
-      ICHECK_NE(delta_output->group_finish_reason.size(), 0);
-      ICHECK_EQ(delta_output->group_delta_token_ids.size(),
-                delta_output->group_finish_reason.size());
-      ICHECK_EQ(delta_output->group_delta_token_ids.size(), rstate.streamer.size());
+      fprintf(stderr, "%s\n", _ss_roles.str().c_str());
 
-      ChatCompletionStreamResponse response;
-      response.id = request_id;
-      response.model = rstate.model;
-      response.system_fingerprint = "";
-
-      for (size_t i = 0; i < delta_output->group_finish_reason.size(); ++i) {
-        // choice
-        ChatCompletionStreamResponseChoice choice;
-        Optional<String> finish_reason = delta_output->group_finish_reason[i];
-        if (finish_reason.has_value()) {
-          if (finish_reason.value() == "stop") {
-            choice.finish_reason = FinishReason::stop;
-          } else if (finish_reason.value() == "length") {
-            choice.finish_reason = FinishReason::length;
-          } else if (finish_reason.value() == "tool_calls") {
-            choice.finish_reason = FinishReason::tool_calls;
-          } else if (finish_reason.value() == "error") {
-            choice.finish_reason = FinishReason::error;
-          }
-        } else {
-          choice.finish_reason = std::nullopt;
-        }
-        choice.index = static_cast<int>(i);
-        ChatCompletionMessage delta;
-        // Size of delta_output->group_delta_token_ids Array should be 1
-        const IntTuple& delta_token_ids = delta_output->group_delta_token_ids[i];
-        std::vector<int32_t> delta_token_ids_vec(delta_token_ids.begin(), delta_token_ids.end());
-        std::string content = rstate.streamer[i]->Put(delta_token_ids_vec);
-        if (finish_reason.has_value()) {
-          content += rstate.streamer[i]->Finish();
-        }
-        if (!content.empty()) {
-          delta.content = content;
-        }
-        delta.role = "assistant";
-        choice.delta = delta;
-        if (!choice.delta.content.IsNull() || choice.finish_reason.has_value()) {
-          response.choices.push_back(choice);
-        }
-      }
-      // if it is not the usage block, choices cannot be empty
-      if (!response.choices.empty()) {
-        json_response_arr.push_back(picojson::value(response.AsJSON()));
-      }
-    }
-    return picojson::value(json_response_arr).serialize();
-  }
-};
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("mlc.json_ffi.CreateJSONFFIEngine",
-                        []() { return ffi::Module(tvm::ffi::make_object<JSONFFIEngineImpl>()); });
-}
-
-}  // namespace json_ffi
-}  // namespace llm
-}  // namespace mlc
+      // Try to emit an EventChannel-friendly diagnostic via the platform shim
+      try {
+        picojson::object diag;
+        diag["type"] = picojson::value(std::string("jsonffi_diag"));
+        diag["modelPath"] = picojson::value(engine_config->model);
+            for (size_t i = 0; i < delta_output->group_finish_reason.size(); ++i) {
+        // Indicate that additional token id prefix diagnostics are compiled
+        // into this build (helps confirm the current binary includes the
+        // patch enabling jsonffi_token_ids_prefix emissions).
+        diag["token_ids_prefix_enabled"] = picojson::value(true);
+        std::string diag_str = picojson::value(diag).serialize();
+        // safe-call: mlc_emit_diagnostic might not be present on all platforms
+        mlc_emit_diagnostic(diag_str.c_str());
+      ... (file continues)
