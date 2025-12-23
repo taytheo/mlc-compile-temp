@@ -221,20 +221,20 @@ jobs:
             echo "picojson not present in mlc-llm-source; attempting to copy fallback from known locations" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/picojson" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
             COPIED=0
-            # Try repository patches first
-            if [ -f .github/patches/picojson.h ]; then
-              cp .github/patches/picojson.h "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            # Try repository patches first (absolute workspace path)
+            if [ -f "${GITHUB_WORKSPACE}/.github/patches/picojson.h" ]; then
+              cp "${GITHUB_WORKSPACE}/.github/patches/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
               COPIED=1
               echo "Copied picojson.h from .github/patches" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             fi
-            # Try common local paths in this workspace
-            if [ "$COPIED" -eq 0 ] && [ -f mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h ]; then
-              cp mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            # Try common local paths in this workspace (absolute)
+            if [ "$COPIED" -eq 0 ] && [ -f "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h" ]; then
+              cp "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
               COPIED=1
               echo "Copied picojson.h from mlc-llm/3rdparty/tvm" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             fi
-            if [ "$COPIED" -eq 0 ] && [ -f third_party/tvm/3rdparty/picojson/picojson.h ]; then
-              cp third_party/tvm/3rdparty/picojson/picojson.h "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            if [ "$COPIED" -eq 0 ] && [ -f "${GITHUB_WORKSPACE}/third_party/tvm/3rdparty/picojson/picojson.h" ]; then
+              cp "${GITHUB_WORKSPACE}/third_party/tvm/3rdparty/picojson/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
               COPIED=1
               echo "Copied picojson.h from third_party/tvm" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             fi
