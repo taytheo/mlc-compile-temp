@@ -227,6 +227,12 @@ jobs:
               COPIED=1
               echo "Copied picojson.h from .github/patches" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             fi
+            # Try scripts folder as well (added fallback)
+            if [ "$COPIED" -eq 0 ] && [ -f "${GITHUB_WORKSPACE}/.github/scripts/picojson.h" ]; then
+              cp "${GITHUB_WORKSPACE}/.github/scripts/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+              COPIED=1
+              echo "Copied picojson.h from .github/scripts" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            fi
             # Try common local paths in this workspace (absolute)
             if [ "$COPIED" -eq 0 ] && [ -f "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h" ]; then
               cp "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
