@@ -118,26 +118,25 @@ def patch_mlc_llm():
     for sp in site_paths:
         target = Path(sp) / 'mlc_llm' / 'cpp' / 'json_ffi' / 'json_ffi_engine.cc'
         attempted_targets.append(str(target))
-        if target.exists():
-            print(f"📍 Found installed mlc_llm source at: {target}")
+        try:
+            # Ensure parent exists then overwrite target with our LOCAL_SRC
+            target.parent.mkdir(parents=True, exist_ok=True)
             bak = target.with_suffix('.cc.bak')
-            try:
-                if not bak.exists():
-                    shutil.copy2(target, bak)
-                    print(f"  🔁 Backup written: {bak}")
-                shutil.copy2(LOCAL_SRC, target)
-                print(f"  ✅ Replaced installed json_ffi_engine.cc with local copy")
-                replaced_targets.append(str(target))
-                with open(target, 'r', encoding='utf-8', errors='replace') as tf:
-                    ct = tf.read()
-                if 'jsonffi_contains_replacement' in ct or 'MLCJSONFFIEngineForceLink_v1' in ct:
-                    print('  🔍 Marker detected in installed copy')
-                else:
-                    print('  ⚠️ Marker NOT detected in installed copy; keep investigating')
-            except Exception as e:
-                print(f"  ❌ Failed to replace file: {e}")
-        else:
-            print(f"  not found: {target}")
+            if target.exists() and not bak.exists():
+                shutil.copy2(target, bak)
+                print(f"  🔁 Backup written: {bak}")
+            shutil.copy2(LOCAL_SRC, target)
+            print(f"  ✅ Forced replaced/installed json_ffi_engine.cc at: {target}")
+            replaced_targets.append(str(target))
+            # quick verification for marker
+            with open(target, 'r', encoding='utf-8', errors='replace') as tf:
+                ct = tf.read()
+            if 'jsonffi_contains_replacement' in ct or 'MLCJSONFFIEngineForceLink_v1' in ct:
+                print('  🔍 Marker detected in installed copy')
+            else:
+                print('  ⚠️ Marker NOT detected in installed copy; keep investigating')
+        except Exception as e:
+            print(f"  ❌ Failed to write/replace installed target {target}: {e}")
 
     outdir = REPO_ROOT / 'tmp_patched_jsonffi'
     outdir.mkdir(parents=True, exist_ok=True)
@@ -153,6 +152,14 @@ def patch_mlc_llm():
             except Exception:
                 pass
         print(f"  🗂 Wrote patched target info and copies to: {outdir}")
+    else:
+        print('  ⚠️ No installed targets were replaced; check site-packages layout or permissions')
+        try:
+            # Write attempted targets for debugging
+            with open(outdir / 'attempted_targets.txt', 'w') as fh:
+                fh.write('\n'.join(attempted_targets) + '\n')
+        except Exception:
+            pass
 
     # Always also try to copy into local mlc-llm-source if present
     local_source_dir = REPO_ROOT / 'mlc-llm-source' / 'cpp' / 'json_ffi'
