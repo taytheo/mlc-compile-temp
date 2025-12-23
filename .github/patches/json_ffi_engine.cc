@@ -28,6 +28,10 @@ namespace json_ffi {
 
 using namespace tvm::runtime;
 
+// Forward declare EmitPersistentHostDiag so constructor can call it before
+// the function is defined later in this translation unit.
+static void EmitPersistentHostDiag(const std::string &json_str);
+
 JSONFFIEngine::JSONFFIEngine() {
   engine_ = serve::ThreadedEngine::Create();
   try {
