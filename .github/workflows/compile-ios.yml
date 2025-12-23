@@ -249,6 +249,18 @@ jobs:
             fi
           fi
 
+          # DEBUG: record patches/scripts folder listing and git status for diagnostics
+          echo "--- DEBUG: Listing .github/patches and .github/scripts ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          ls -la "${GITHUB_WORKSPACE}/.github/patches" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          ls -la "${GITHUB_WORKSPACE}/.github/scripts" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "--- DEBUG: git ls-files for picojson.h and json_ffi_engine.cc ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          git -C "${GITHUB_WORKSPACE}" ls-files | grep -E "\.github/(patches|scripts)/picojson.h|json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "--- DEBUG: git log for picojson.h ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          git -C "${GITHUB_WORKSPACE}" log -n 5 --pretty=oneline -- .github/patches/picojson.h >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "--- DEBUG: cat .github/patches/picojson.h (first 40 lines) ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          sed -n '1,40p' "${GITHUB_WORKSPACE}/.github/patches/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "--- DEBUG END ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+
           if [ -f "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" ]; then
             echo "Dumping head of json_ffi_engine.cc to diagnostics" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             head -n 240 "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" > ../../tmp_ci_diagnostics/outputs/json_ffi_head.txt || true
