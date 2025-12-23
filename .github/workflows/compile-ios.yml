@@ -215,6 +215,19 @@ jobs:
             cp .github/patches/json_ffi_engine.cc ../../tmp_ci_diagnostics/outputs/tmp_patched_jsonffi_snapshot/patched-json_ffi_engine.cc || true
             echo "Wrote patch snapshot to tmp_patched_jsonffi_snapshot/" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           fi
+
+          # Ensure picojson header exists in source tree for early syntax checks
+          if [ ! -d "$MLC_LLM_SOURCE_DIR/3rdparty/picojson" ]; then
+            echo "picojson not present in mlc-llm-source; copying fallback from .github/patches" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/picojson" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            if [ -f .github/patches/picojson.h ]; then
+              cp .github/patches/picojson.h "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+              echo "Copied picojson.h fallback into mlc-llm-source/3rdparty/picojson/" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            else
+              echo "No picojson fallback found in .github/patches; skipping" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            fi
+          fi
+
           if [ -f "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" ]; then
             echo "Dumping head of json_ffi_engine.cc to diagnostics" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             head -n 240 "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" > ../../tmp_ci_diagnostics/outputs/json_ffi_head.txt || true
@@ -271,7 +284,11 @@ jobs:
           # If compile_commands.json present, run a real compile-only syntax check using its exact command for json_ffi_engine.cc
           if [ -f build/compile_commands.json ]; then
             echo "Found compile_commands.json; running exact syntax check for json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            python3 .github/scripts/run_compile_syntax_check.py >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            if [ -f "${GITHUB_WORKSPACE}/.github/scripts/run_compile_syntax_check.py" ]; then
+              python3 "${GITHUB_WORKSPACE}/.github/scripts/run_compile_syntax_check.py" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            else
+              echo "run_compile_syntax_check.py not found in workspace; skipping exact syntax check" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            fi
           fi
 
           echo "Building mlc_llm_static" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
