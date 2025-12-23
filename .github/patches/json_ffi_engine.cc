@@ -172,7 +172,13 @@ bool JSONFFIEngine::AddRequest(std::string request_json_str, std::string request
   for (int i = 0; i < gen_cfg->n; ++i) {
     rstate.streamer.push_back(TextStreamer(tokenizer_));
   }
-  request_map_[request_id] = std::move(rstate);
+  // Avoid copy-assign requirement and be compatible with headers that may
+  // not expose atomic counters: move available members and leave defaults
+  {
+    auto &dst = request_map_[request_id];
+    dst.model = std::move(rstate.model);
+    dst.streamer = std::move(rstate.streamer);
+  }
 
   this->engine_->AddRequest(engine_request);
   return true;
