@@ -1,5 +1,6 @@
 // json_ffi_engine.cc
 // Patched snapshot for CI (includes small safety edits for CI use)
+// jsonffi_contains_replacement_v1
 
 #include "json_ffi_engine.h"
 
