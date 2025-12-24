@@ -109,7 +109,7 @@ jobs:
           pip install --pre -U -f https://mlc.ai/wheels tvm tvm_ffi >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
         fi
         # verify imports and record locations (use dedicated script)
-        python3 "${GITHUB_WORKSPACE}/.github/scripts/verify_tvm_imports.py" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+        python3 "${GITHUB_WORKSPACE}/.github/scripts/verify_tvm_imports.py" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1
 
     - name: Ensure Metal toolchain is available
       run: |
@@ -427,7 +427,7 @@ jobs:
             tar -tf output/model-iphone.tar | sed -n '1,200p' || true
             echo "Checking added libs for marker strings" > tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
             for lib in tmp_ci_diagnostics/outputs/*; do
-              if [ -f "$lib" ] && (echo "$lib" | egrep -i '\.a$|\.dylib$|\.so$' >/dev/null); then
+              if [ -f "$lib" ] && echo "$lib" | egrep -i '\.a$|\.dylib$|\.so$' >/dev/null 2>&1; then
                 echo "Inspecting $lib" >> tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
                 strings "$lib" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n >> tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
                 nm -g "$lib" 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi' -n >> tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
