@@ -265,7 +265,7 @@ jobs:
             echo "Dumping head of json_ffi_engine.cc to diagnostics" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             head -n 240 "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" > ../../tmp_ci_diagnostics/outputs/json_ffi_head.txt || true
             echo "Checking syntax of json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            if ! c++ -fsyntax-only -x c++ -I"$MLC_LLM_SOURCE_DIR/3rdparty/picojson" "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
+            if ! c++ -fsyntax-only -x c++ -I"$MLC_LLM_SOURCE_DIR/3rdparty/picojson" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/include" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/include" "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
               echo "WARNING: json_ffi_engine.cc has syntax errors after replacement. Dumping file below and continuing with fallback." >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
               sed -n '1,240p' "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
               JSON_SYNTAX_FAILED=1
@@ -281,7 +281,7 @@ jobs:
                   echo "fix_jsonffi_braces.py not found in repo root; skipping auto-brace fix" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
                 fi
                 echo "Re-running syntax check after fix" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-                if ! c++ -fsyntax-only -x c++ -I"$MLC_LLM_SOURCE_DIR/3rdparty/picojson" "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
+                if ! c++ -fsyntax-only -x c++ -I"$MLC_LLM_SOURCE_DIR/3rdparty/picojson" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/include" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/include" "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
                   echo "Brace-fix did not resolve syntax errors; leaving JSON_SYNTAX_FAILED=1" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
                   JSON_SYNTAX_FAILED=1
                 else
