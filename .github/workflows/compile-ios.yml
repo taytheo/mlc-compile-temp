@@ -97,6 +97,20 @@ jobs:
         fi
         python3 .github/scripts/show_installed_mlc_llm.py || true
 
+    - name: Install TVM wheel (tvm & tvm-ffi) and verify imports
+      run: |
+        echo "Attempting to install TVM / tvm-ffi wheels (preferred)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+        set -x
+        if [ -f .github/scripts/install_tvm_wheel.sh ]; then
+          echo "Running .github/scripts/install_tvm_wheel.sh" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          bash .github/scripts/install_tvm_wheel.sh >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+        else
+          echo "install_tvm_wheel.sh not present; trying pip install from mlc.ai wheels" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          pip install --pre -U -f https://mlc.ai/wheels tvm tvm_ffi >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+        fi
+        # verify imports and record locations (use dedicated script)
+        python3 "${GITHUB_WORKSPACE}/.github/scripts/verify_tvm_imports.py" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+
     - name: Ensure Metal toolchain is available
       run: |
         echo "Checking Metal..."
@@ -249,35 +263,27 @@ jobs:
             fi
           fi
 
-          # Ensure dlpack header exists for tvm includes (fallback if missing)
-          if [ ! -f "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h" ]; then
-            echo "dlpack header missing in mlc-llm-source; attempting to copy fallback" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            if [ -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" ]; then
-              cp "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-              echo "Copied dlpack.h fallback into tvm-ffi dlpack include" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-              # Also attempt to populate other common dlpack include locations for robustness
-              mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-              if [ ! -f "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack/dlpack.h" ]; then
-                cp "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-                echo "Copied dlpack.h fallback into mlc-llm/3rdparty/dlpack include" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-              fi
-              # xgrammar location
-              mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-              if [ ! -f "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack/dlpack.h" ]; then
-                cp "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-                echo "Copied dlpack.h fallback into xgrammar dlpack include" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-              fi
-              # Also ensure a copy exists in workspace scripts for visibility
-              if [ -f "${GITHUB_WORKSPACE}/.github/scripts/dlpack.h" ]; then
-                echo "scripts dlpack.h already present" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-              else
-                cp "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "${GITHUB_WORKSPACE}/.github/scripts/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-                echo "Wrote scripts/picojson.h fallback copy" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-              fi
-            else
-              echo "No dlpack fallback found in .github/patches; skipping" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            fi
+          # Ensure dlpack header exists for tvm includes (force-copy fallbacks to multiple locations)
+          echo "Ensuring dlpack fallback present in target locations" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          COPIED_DL=0
+          if [ -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" ]; then
+            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            COPIED_DL=1
+            echo "Force-copied dlpack.h to tvm-ffi, 3rdparty/dlpack, and xgrammar locations" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          fi
+          # Also ensure scripts copy exists for visibility
+          if [ -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" ] && [ ! -f "${GITHUB_WORKSPACE}/.github/scripts/dlpack.h" ]; then
+            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "${GITHUB_WORKSPACE}/.github/scripts/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            echo "Wrote scripts/dlpack.h fallback copy" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          fi
+          if [ "$COPIED_DL" -eq 0 ]; then
+            echo "No dlpack fallback found in .github/patches; skipping dlpack population" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          fi
           fi
 
           # DEBUG: record patches/scripts folder listing and git status for diagnostics
