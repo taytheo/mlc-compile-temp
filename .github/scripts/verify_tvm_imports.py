@@ -6,6 +6,7 @@ import importlib
 import sys
 
 modules = ('tvm', 'tvm_ffi')
+any_failed = False
 for m in modules:
     try:
         mod = importlib.import_module(m)
@@ -13,6 +14,7 @@ for m in modules:
         print(f"{m} present at: {location}")
     except Exception as e:
         print(f"{m} import failed: {e}")
+        any_failed = True
 
-# Exit successfully even if imports fail; workflow handles logging
-sys.exit(0)
+# Exit with non-zero code if any import fails to make the workflow fail fast
+sys.exit(1) if any_failed else sys.exit(0)
