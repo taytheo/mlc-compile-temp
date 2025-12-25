@@ -76,19 +76,19 @@ jobs:
           echo "Cloned mlc-llm into mlc-llm-source"
           mkdir -p mlc-llm-source/cpp/json_ffi
           if [ -f mlc-llm/cpp/json_ffi/json_ffi_engine.cc ]; then
-            echo "Using workspace mlc-llm/cpp/json_ffi/json_ffi_engine.cc as source patch" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            echo "Using workspace mlc-llm/cpp/json_ffi/json_ffi_engine.cc as source patch" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
             cp mlc-llm/cpp/json_ffi/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
           elif [ -f .github/patches/json_ffi_engine.cc ]; then
-            echo "Using .github/patches/json_ffi_engine.cc as source patch" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            echo "Using .github/patches/json_ffi_engine.cc as source patch" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
             cp .github/patches/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
           else
-            echo "No local patch found to copy into mlc-llm-source" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            echo "No local patch found to copy into mlc-llm-source" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           fi
           echo "--- head of patched file ---"
           head -n 80 mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
           # ensure marker symbol exists in the local source; if missing, append a minimal force-link constant (via helper script)
           if [ -f mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc ]; then
-            .github/scripts/ensure_force_link_marker.sh mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            .github/scripts/ensure_force_link_marker.sh mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           else
             echo "mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc not found; skipping marker append" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           fi
@@ -99,17 +99,17 @@ jobs:
 
     - name: Install TVM wheel (tvm & tvm-ffi) and verify imports
       run: |
-        echo "Attempting to install TVM / tvm-ffi wheels (preferred)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+        echo "Attempting to install TVM / tvm-ffi wheels (preferred)" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
         set -x
         if [ -f .github/scripts/install_tvm_wheel.sh ]; then
-          echo "Running .github/scripts/install_tvm_wheel.sh" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          bash .github/scripts/install_tvm_wheel.sh >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "Running .github/scripts/install_tvm_wheel.sh" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
+          bash .github/scripts/install_tvm_wheel.sh >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
         else
-          echo "install_tvm_wheel.sh not present; trying pip install from mlc.ai wheels" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          pip install --pre -U -f https://mlc.ai/wheels tvm tvm_ffi >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "install_tvm_wheel.sh not present; trying pip install from mlc.ai wheels" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
+          pip install --pre -U -f https://mlc.ai/wheels tvm tvm_ffi >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
         fi
         # verify imports and record locations (use dedicated script)
-        python3 "${GITHUB_WORKSPACE}/.github/scripts/verify_tvm_imports.py" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1
+        python3 "${GITHUB_WORKSPACE}/.github/scripts/verify_tvm_imports.py" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1
 
     - name: Ensure Metal toolchain is available
       run: |
@@ -208,48 +208,48 @@ jobs:
       if: always()
       run: |
         echo "Attempting to build iOS static libs and append to model tar (best-effort)"
-        mkdir -p tmp_ci_diagnostics/outputs
+        mkdir -p "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs" && LOGDIR="${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs"
         if [ -d mlc-llm-source ]; then
           echo "Running cmake build for ios static libs (logs -> tmp_ci_diagnostics/outputs/prepare_libs.log)"
           pushd mlc-llm-source/ios >/dev/null 2>&1 || true
           export MLC_LLM_SOURCE_DIR="$(pwd)/.."
-          echo "Using MLC_LLM_SOURCE_DIR=$MLC_LLM_SOURCE_DIR" > ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          echo "Installing rust target aarch64-apple-ios (if not present)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          rustup target add aarch64-apple-ios >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "Using MLC_LLM_SOURCE_DIR=$MLC_LLM_SOURCE_DIR" > "$LOGDIR/prepare_libs.log" || true
+          echo "Installing rust target aarch64-apple-ios (if not present)" >> "$LOGDIR/prepare_libs.log" || true
+          rustup target add aarch64-apple-ios >> "$LOGDIR/prepare_libs.log" 2>&1 || true
 
-          echo "Running a quick C++ syntax check on json_ffi source (and replace if invalid)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          echo "Running a quick C++ syntax check on json_ffi source (and replace if invalid)" >> "$LOGDIR/prepare_libs.log" || true
           echo "Forcing replacement of json_ffi_engine.cc from repository patch (if present)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
           if [ -f .github/patches/json_ffi_engine.cc ]; then
-            echo "Forcing copy of repo patch into mlc-llm-source (overwrite)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            mkdir -p "$MLC_LLM_SOURCE_DIR/cpp/json_ffi" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            cp -f .github/patches/json_ffi_engine.cc "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            echo "Copied .github/patches/json_ffi_engine.cc to $MLC_LLM_SOURCE_DIR/cpp/json_ffi/ (forced)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            echo "Forcing copy of repo patch into mlc-llm-source (overwrite)" >> "$LOGDIR/prepare_libs.log" || true
+            mkdir -p "$MLC_LLM_SOURCE_DIR/cpp/json_ffi" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            cp -f .github/patches/json_ffi_engine.cc "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            echo "Copied .github/patches/json_ffi_engine.cc to $MLC_LLM_SOURCE_DIR/cpp/json_ffi/ (forced)" >> "$LOGDIR/prepare_libs.log" || true
             # Save a copy of the patched file into diagnostics for inspection
-            mkdir -p ../../tmp_ci_diagnostics/outputs/tmp_patched_jsonffi_snapshot || true
-            cp .github/patches/json_ffi_engine.cc ../../tmp_ci_diagnostics/outputs/tmp_patched_jsonffi_snapshot/patched-json_ffi_engine.cc || true
-            echo "Wrote patch snapshot to tmp_patched_jsonffi_snapshot/" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            mkdir -p "$LOGDIR/tmp_patched_jsonffi_snapshot" || true
+            cp .github/patches/json_ffi_engine.cc "$LOGDIR/tmp_patched_jsonffi_snapshot/patched-json_ffi_engine.cc" || true
+            echo "Wrote patch snapshot to tmp_patched_jsonffi_snapshot/" >> "$LOGDIR/prepare_libs.log" || true
           fi
 
           # Ensure picojson header exists in source tree for early syntax checks
           if [ ! -d "$MLC_LLM_SOURCE_DIR/3rdparty/picojson" ]; then
-            echo "picojson not present in mlc-llm-source; attempting to copy fallback from known locations" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/picojson" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            echo "picojson not present in mlc-llm-source; attempting to copy fallback from known locations" >> "$LOGDIR/prepare_libs.log" || true
+            mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/picojson" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
             COPIED=0
             # Try repository patches first (absolute workspace path)
             if [ -f "${GITHUB_WORKSPACE}/.github/patches/picojson.h" ]; then
-              cp "${GITHUB_WORKSPACE}/.github/patches/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+              cp "${GITHUB_WORKSPACE}/.github/patches/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
               COPIED=1
               echo "Copied picojson.h from .github/patches" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             fi
             # Try scripts folder as well (added fallback)
             if [ "$COPIED" -eq 0 ] && [ -f "${GITHUB_WORKSPACE}/.github/scripts/picojson.h" ]; then
-              cp "${GITHUB_WORKSPACE}/.github/scripts/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+              cp "${GITHUB_WORKSPACE}/.github/scripts/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
               COPIED=1
               echo "Copied picojson.h from .github/scripts" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             fi
             # Try common local paths in this workspace (absolute)
             if [ "$COPIED" -eq 0 ] && [ -f "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h" ]; then
-              cp "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+              cp "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
               COPIED=1
               echo "Copied picojson.h from mlc-llm/3rdparty/tvm" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             fi
@@ -419,18 +419,22 @@ jobs:
             for f in mlc-llm-source/build/lib/*; do
               [ -f "$f" ] || continue
               echo "  adding $f"
-              tar -rf output/model-iphone.tar -C "$(dirname "$f")" "$(basename "$f")" || echo "failed to add $f"
+              if [ -f output/model-iphone.tar ]; then
+                tar -rf output/model-iphone.tar -C "$(dirname "$f")" "$(basename "$f")" || echo "failed to add $f"
+              else
+                tar -cf output/model-iphone.tar -C "$(dirname "$f")" "$(basename "$f")" || echo "failed to create archive with $f"
+              fi
               # copy the lib into tmp outputs for inspection
-              cp "$f" tmp_ci_diagnostics/outputs/ || true
+              cp "$f" "$LOGDIR/" || true
             done
             echo "Tar contents after append:"
             tar -tf output/model-iphone.tar | sed -n '1,200p' || true
-            echo "Checking added libs for marker strings" > tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
-            for lib in tmp_ci_diagnostics/outputs/*; do
+            echo "Checking added libs for marker strings" > "$LOGDIR/lib_marker_checks.txt" || true
+            for lib in "$LOGDIR"/*; do
               if [ -f "$lib" ] && echo "$lib" | egrep -i '\.a$|\.dylib$|\.so$' >/dev/null 2>&1; then
-                echo "Inspecting $lib" >> tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
-                strings "$lib" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n >> tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
-                nm -g "$lib" 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi' -n >> tmp_ci_diagnostics/outputs/lib_marker_checks.txt || true
+                echo "Inspecting $lib" >> "$LOGDIR/lib_marker_checks.txt" || true
+                strings "$lib" | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi_contains_replacement' -n >> "$LOGDIR/lib_marker_checks.txt" || true
+                nm -g "$lib" 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink|jsonffi' -n >> "$LOGDIR/lib_marker_checks.txt" || true
               fi
             done
 
@@ -475,6 +479,10 @@ jobs:
         else
           echo "No local source; using installed mlc-llm"
           python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+          # Ensure output tar exists before attempting append steps later
+          if [ ! -f output/model-iphone.tar ]; then
+            echo "Model output tar not created by compile step" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
+          fi
         fi
 
     - name: Upload compile debug dump
