@@ -10,10 +10,10 @@ fi
 
 echo "-- Attempt editable install of local mlc-llm (if available) --"
 if [ -d mlc-llm-source/python ]; then
-  echo "Found mlc-llm-source/python; attempting editable install and requirements install" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-  pip install -e ./mlc-llm-source/python >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+  echo "Found mlc-llm-source/python; attempting editable install and requirements install" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
+  pip install -e ./mlc-llm-source/python >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
   if [ -f mlc-llm-source/python/requirements.txt ]; then
-    pip install -r mlc-llm-source/python/requirements.txt >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+    pip install -r mlc-llm-source/python/requirements.txt >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
   fi
 fi
 
