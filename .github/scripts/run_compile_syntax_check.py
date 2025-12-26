@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Run a robust syntax-only check for json_ffi_engine.cc using build/compile_commands.json
-Writes diagnostics to ../../tmp_ci_diagnostics/outputs/json_ffi_syntax_check.txt
+Writes diagnostics to ${GITHUB_WORKSPACE:-$PWD}/tmp_ci_diagnostics/outputs/json_ffi_syntax_check.txt
 Exits 0 always (non-fatal); writes rc and output to the diagnostics file.
 """
 import json
