@@ -29,6 +29,27 @@ typedef struct DLDevice {
   int device_id;
 } DLDevice;
 
+/* Data type codes (compatibility constants) */
+typedef enum {
+  kDLInt = 0,
+  kDLUInt = 1,
+  kDLFloat = 2,
+  kDLOpaqueHandle = 3,
+  kDLBfloat = 4,
+  kDLBool = 5,
+  /* extended / experimental codes (placeholders) */
+  kDLFloat8_e3m4 = 128,
+  kDLFloat8_e4m3 = 129,
+  kDLFloat8_e4m3b11fnuz = 130,
+  kDLFloat8_e4m3fn = 131,
+  kDLFloat8_e4m3fnuz = 132,
+  kDLFloat8_e5m2 = 133,
+  kDLFloat8_e5m2fnuz = 134,
+  kDLFloat8_e8m0fnu = 135,
+  kDLFloat6_e2m3fn = 136,
+  kDLFloat6_e3m2fn = 137
+} DLDataTypeCode;
+
 /* Data type description */
 typedef struct DLDataType {
   uint8_t code;   /* Type code, e.g., kDLFloat, kDLInt, ... */
@@ -53,6 +74,14 @@ typedef struct DLManagedTensor {
   void* manager_ctx;
   void (*deleter)(struct DLManagedTensor*);
 } DLManagedTensor;
+
+/* Versioned managed tensor used by some consumers */
+typedef struct DLManagedTensorVersioned {
+  DLTensor dl_tensor;
+  void* manager_ctx;
+  void (*deleter)(struct DLManagedTensorVersioned*);
+  int version;
+} DLManagedTensorVersioned;
 
 #ifdef __cplusplus
 }
