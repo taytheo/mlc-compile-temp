@@ -281,6 +281,16 @@ jobs:
             cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack/dlpack.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
             COPIED_DL=1
             echo "Force-copied dlpack.h to tvm-ffi, 3rdparty/dlpack, and xgrammar locations" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
+            # DEBUG: dump the contents and sizes of the target dlpack headers to aid diagnostics
+            echo "--- HEAD of tvm-ffi dlpack.h ---" >> "$LOGDIR/prepare_libs.log" || true
+            sed -n '1,120p' "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            echo "size:" $(wc -c "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h" | awk '{print $1}') >> "$LOGDIR/prepare_libs.log" || true
+            echo "--- HEAD of 3rdparty/dlpack dlpack.h ---" >> "$LOGDIR/prepare_libs.log" || true
+            sed -n '1,120p' "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack/dlpack.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            echo "size:" $(wc -c "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack/dlpack.h" | awk '{print $1}') >> "$LOGDIR/prepare_libs.log" || true
+            echo "--- HEAD of xgrammar dlpack.h ---" >> "$LOGDIR/prepare_libs.log" || true
+            sed -n '1,120p' "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack/dlpack.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            echo "size:" $(wc -c "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack/dlpack.h" | awk '{print $1}') >> "$LOGDIR/prepare_libs.log" || true
           fi
           # Also ensure scripts copy exists for visibility
           if [ -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" ] && [ ! -f "${GITHUB_WORKSPACE}/.github/scripts/dlpack.h" ]; then
