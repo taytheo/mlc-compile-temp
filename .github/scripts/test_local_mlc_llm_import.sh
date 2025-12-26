@@ -19,9 +19,9 @@ fi
 
 # If tvm python exists in submodule, try to install it so imports succeed during tests
 # Try installing TVM via several strategies (PyPI names, mlc.ai wheels, submodule)
-.github/scripts/install_tvm_wheel.sh ../../tmp_ci_diagnostics/outputs/prepare_libs.log >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+bash .github/scripts/install_tvm_wheel.sh >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
 # verify tvm import
-python - <<'PY' >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+python - <<'PY' >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
 try:
     import tvm
     print('tvm import OK:', getattr(tvm, '__file__', 'no-file'))
@@ -60,11 +60,11 @@ done
 
 # If import still fails, do not abort CI; write a diagnostics marker and continue
 if [ "$IMPORT_OK" -eq 0 ]; then
-  echo "WARNING: Could not import mlc_llm from local source using tried PYTHONPATH variants; continuing but recording diagnostics" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+  echo "WARNING: Could not import mlc_llm from local source using tried PYTHONPATH variants; continuing but recording diagnostics" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
   mkdir -p tmp_patched_jsonffi || true
   touch tmp_patched_jsonffi/import_failed.txt || true
 else
-  echo "Import test passed; proceeding to compile with local source if available." >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+  echo "Import test passed; proceeding to compile with local source if available." >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
 fi
 
 # Verify patched file presence in mlc-llm-source
