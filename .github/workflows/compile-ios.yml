@@ -294,28 +294,28 @@ jobs:
 
           # DEBUG: record patches/scripts folder listing and git status for diagnostics
           echo "--- DEBUG: Listing .github/patches and .github/scripts ---" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
-          ls -la "${GITHUB_WORKSPACE}/.github/patches" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-          ls -la "${GITHUB_WORKSPACE}/.github/scripts" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-          echo "--- DEBUG: git ls-files for picojson.h and json_ffi_engine.cc ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          ls -la "${GITHUB_WORKSPACE}/.github/patches" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+          ls -la "${GITHUB_WORKSPACE}/.github/scripts" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+          echo "--- DEBUG: git ls-files for picojson.h and json_ffi_engine.cc ---" >> "$LOGDIR/prepare_libs.log" || true
           git -C "${GITHUB_WORKSPACE}" ls-files | grep -E "\.github/(patches|scripts)/picojson.h|json_ffi_engine.cc" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
-          echo "--- DEBUG: git log for picojson.h ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          echo "--- DEBUG: git log for picojson.h ---" >> "$LOGDIR/prepare_libs.log" || true
           git -C "${GITHUB_WORKSPACE}" log -n 5 --pretty=oneline -- .github/patches/picojson.h >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
-          echo "--- DEBUG: cat .github/patches/picojson.h (first 40 lines) ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          sed -n '1,40p' "${GITHUB_WORKSPACE}/.github/patches/picojson.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
-          echo "--- DEBUG END ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          echo "--- DEBUG: cat .github/patches/picojson.h (first 40 lines) ---" >> "$LOGDIR/prepare_libs.log" || true
+          sed -n '1,40p' "${GITHUB_WORKSPACE}/.github/patches/picojson.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+          echo "--- DEBUG END ---" >> "$LOGDIR/prepare_libs.log" || true
 
           if [ -f "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" ]; then
-            echo "Dumping head of json_ffi_engine.cc to diagnostics" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            head -n 240 "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" > ../../tmp_ci_diagnostics/outputs/json_ffi_head.txt || true
-            echo "Checking syntax of json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            echo "--- DEBUG: check TVM include dirs for array.h ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            ls -la "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/include" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            ls -la "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/include" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            ls -la "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/tvm-ffi/include" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            ls -la "${GITHUB_WORKSPACE}/third_party/tvm/3rdparty/tvm-ffi/include" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            echo "--- find container/array.h occurrences ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-            find "$MLC_LLM_SOURCE_DIR" -name array.h -path "*/tvm/ffi/container/*" -print >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            find "${GITHUB_WORKSPACE}" -name array.h -path "*/tvm/ffi/container/*" -print >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            echo "Dumping head of json_ffi_engine.cc to diagnostics" >> "$LOGDIR/prepare_libs.log" || true
+            head -n 240 "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" > "$LOGDIR/json_ffi_head.txt" || true
+            echo "Checking syntax of json_ffi_engine.cc" >> "$LOGDIR/prepare_libs.log" || true
+            echo "--- DEBUG: check TVM include dirs for array.h ---" >> "$LOGDIR/prepare_libs.log" || true
+            ls -la "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/include" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            ls -la "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/include" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            ls -la "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/tvm-ffi/include" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            ls -la "${GITHUB_WORKSPACE}/third_party/tvm/3rdparty/tvm-ffi/include" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            echo "--- find container/array.h occurrences ---" >> "$LOGDIR/prepare_libs.log" || true
+            find "$MLC_LLM_SOURCE_DIR" -name array.h -path "*/tvm/ffi/container/*" -print >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            find "${GITHUB_WORKSPACE}" -name array.h -path "*/tvm/ffi/container/*" -print >> "$LOGDIR/prepare_libs.log" 2>&1 || true
             if ! c++ -fsyntax-only -x c++ -I"$MLC_LLM_SOURCE_DIR/3rdparty/picojson" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/include" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/include" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/dlpack/include" "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
               echo "WARNING: json_ffi_engine.cc has syntax errors after replacement. Dumping file below and continuing with fallback." >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
               sed -n '1,240p' "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
@@ -329,7 +329,7 @@ jobs:
                 if [ -f "$MLC_LLM_SOURCE_DIR/../.github/scripts/fix_jsonffi_braces.py" ]; then
                   python3 "$MLC_LLM_SOURCE_DIR/../.github/scripts/fix_jsonffi_braces.py" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
                 else
-                  echo "fix_jsonffi_braces.py not found in repo root; skipping auto-brace fix" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+                  echo "fix_jsonffi_braces.py not found in repo root; skipping auto-brace fix" >> "$LOGDIR/prepare_libs.log" || true
                 fi
                 echo "Re-running syntax check after fix" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
                 if ! c++ -fsyntax-only -x c++ -I"$MLC_LLM_SOURCE_DIR/3rdparty/picojson" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/include" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/include" -I"$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/dlpack/include" "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
@@ -417,8 +417,8 @@ jobs:
           popd >/dev/null 2>&1 || true
 
           BUILD_LIB_DIR="mlc-llm-source/ios/build/lib"
-          echo "Listing $BUILD_LIB_DIR (if any):" > tmp_ci_diagnostics/outputs/build_lib_list.txt || true
-          ls -la "$BUILD_LIB_DIR" >> tmp_ci_diagnostics/outputs/build_lib_list.txt 2>&1 || true
+          echo "Listing $BUILD_LIB_DIR (if any):" > "$LOGDIR/build_lib_list.txt" || true
+          ls -la "$BUILD_LIB_DIR" >> "$LOGDIR/build_lib_list.txt" 2>&1 || true
 
           mkdir -p output || true
           if [ -d "$BUILD_LIB_DIR" ]; then
@@ -447,33 +447,37 @@ jobs:
 
             # If no marker found in added libs, perform fallback: compile a small
             # force-link object for aarch64-apple-ios, archive it to .a and append
-            if ! grep -q -i 'MLCJSONFFIEngineForceLink\|jsonffi_contains_replacement' tmp_ci_diagnostics/outputs/lib_marker_checks.txt; then
-              echo "No marker found in packaged libs; performing fallback append" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
-              mkdir -p output/ci_fallback tmp_ci_diagnostics/outputs/ci_fallback || true
+            if ! grep -q -i 'MLCJSONFFIEngineForceLink\|jsonffi_contains_replacement' "$LOGDIR/lib_marker_checks.txt"; then
+              echo "No marker found in packaged libs; performing fallback append" >> "$LOGDIR/prepare_libs.log" || true
+              mkdir -p output/ci_fallback "$LOGDIR/ci_fallback" || true
               SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
-              clang -target aarch64-apple-ios -isysroot "$SDKROOT" -c .github/patches/ci_force_link_jsonffi.c -o output/ci_fallback/ci_force_link_jsonffi.o 2>> tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              clang -target aarch64-apple-ios -isysroot "$SDKROOT" -c .github/patches/ci_force_link_jsonffi.c -o output/ci_fallback/ci_force_link_jsonffi.o 2>> "$LOGDIR/prepare_libs.log" || true
               if [ -f output/ci_fallback/ci_force_link_jsonffi.o ]; then
                 # create a static archive
                 ar rcs output/ci_fallback/libci_force_link_jsonffi.a output/ci_fallback/ci_force_link_jsonffi.o || true
-                echo "Fallback lib created: output/ci_fallback/libci_force_link_jsonffi.a" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
-                tar -rf output/model-iphone.tar -C output/ci_fallback libci_force_link_jsonffi.a || echo "failed to add fallback lib to tar" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
-                cp output/ci_fallback/libci_force_link_jsonffi.a tmp_ci_diagnostics/outputs/ci_fallback/ || true
-                echo "strings on fallback lib:" >> tmp_ci_diagnostics/outputs/ci_fallback/strings.txt || true
-                strings output/ci_fallback/libci_force_link_jsonffi.a | egrep -i 'MLCJSONFFIEngineForceLink' -n >> tmp_ci_diagnostics/outputs/ci_fallback/strings.txt || true
-                echo "nm on fallback lib:" >> tmp_ci_diagnostics/outputs/ci_fallback/nm.txt || true
-                nm -g output/ci_fallback/libci_force_link_jsonffi.a 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink' -n >> tmp_ci_diagnostics/outputs/ci_fallback/nm.txt || true
+                echo "Fallback lib created: output/ci_fallback/libci_force_link_jsonffi.a" >> "$LOGDIR/prepare_libs.log" || true
+                if [ -f output/model-iphone.tar ]; then
+                  tar -rf output/model-iphone.tar -C output/ci_fallback libci_force_link_jsonffi.a || echo "failed to add fallback lib to tar" >> "$LOGDIR/prepare_libs.log" || true
+                else
+                  tar -cf output/model-iphone.tar -C output/ci_fallback libci_force_link_jsonffi.a || echo "failed to create archive with fallback lib" >> "$LOGDIR/prepare_libs.log" || true
+                fi
+                cp output/ci_fallback/libci_force_link_jsonffi.a "$LOGDIR/ci_fallback/" || true
+                echo "strings on fallback lib:" >> "$LOGDIR/ci_fallback/strings.txt" || true
+                strings output/ci_fallback/libci_force_link_jsonffi.a | egrep -i 'MLCJSONFFIEngineForceLink' -n >> "$LOGDIR/ci_fallback/strings.txt" || true
+                echo "nm on fallback lib:" >> "$LOGDIR/ci_fallback/nm.txt" || true
+                nm -g output/ci_fallback/libci_force_link_jsonffi.a 2>/dev/null | egrep -i 'MLCJSONFFIEngineForceLink' -n >> "$LOGDIR/ci_fallback/nm.txt" || true
               else
-                echo "Fallback compile failed" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
+                echo "Fallback compile failed" >> "$LOGDIR/prepare_libs.log" || true
               fi
             else
-              echo "Marker found in added libs; no fallback needed" >> tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              echo "Marker found in added libs; no fallback needed" >> "$LOGDIR/prepare_libs.log" || true
             fi
           fi
         else
           echo "mlc-llm-source not present; skipping iOS lib build/append" > tmp_ci_diagnostics/outputs/build_lib_list.txt
         fi
         echo "Copying diagnostics to tmp_ci_diagnostics for upload"
-        ls -la tmp_ci_diagnostics || true
+        ls -la "$LOGDIR" || true
 
     - name: Compile for iPhone (with debug-dump, prefer local source)
       run: |
