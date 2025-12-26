@@ -53,4 +53,4 @@ find . -type f -name 'json_ffi_engine.cc' -print | while read -r p; do
 done || true
 
 echo "Listing diagnostics dir..."
-ls -la tmp_ci_diagnostics || true
+ls -la "$OUTDIR" || true
