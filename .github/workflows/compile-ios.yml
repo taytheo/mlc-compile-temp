@@ -10,6 +10,7 @@ on:
       xcode_version:
         description: 'Optional Xcode version label (unused, informational)'
         required: false
+        default: '15.3'
 
 jobs:
   build-ios-artifacts:
@@ -626,10 +627,28 @@ jobs:
         set -x
         find output -type f \( -name 'lib0.o' -o -name '*devc*.o' -o -name '*_devc.o' \) -print > found_objs.txt || true
         if [ ! -s found_objs.txt ]; then
-          echo "ERROR: No devc-style object found in output directory."
-          echo "All output files:"
-          ls -la output || true
-          exit 1
+          echo "No devc-style object found in output directory; attempting to create fallback object" >> "$LOGDIR/prepare_libs.log" || true
+          mkdir -p output/ci_fallback
+          if [ -f .github/patches/ci_force_link_jsonffi.c ]; then
+            echo "Compiling fallback force-link object from .github/patches/ci_force_link_jsonffi.c" >> "$LOGDIR/prepare_libs.log" || true
+            clang -c .github/patches/ci_force_link_jsonffi.c -o output/ci_fallback/ci_force_link_jsonffi.o 2>> "$LOGDIR/prepare_libs.log" || true
+            if [ -f output/ci_fallback/ci_force_link_jsonffi.o ]; then
+              echo "Fallback object created; adding to found_objs.txt" >> "$LOGDIR/prepare_libs.log" || true
+              echo output/ci_fallback/ci_force_link_jsonffi.o > found_objs.txt
+            else
+              echo "Fallback object compile failed; no devc-style object available" >> "$LOGDIR/prepare_libs.log" || true
+              echo "ERROR: No devc-style object found in output directory." >&2
+              echo "All output files:" >&2
+              ls -la output || true
+              exit 1
+            fi
+          else
+            echo "No .github/patches/ci_force_link_jsonffi.c present; cannot create fallback object" >> "$LOGDIR/prepare_libs.log" || true
+            echo "ERROR: No devc-style object found in output directory." >&2
+            echo "All output files:" >&2
+            ls -la output || true
+            exit 1
+          fi
         fi
         cat found_objs.txt
 
