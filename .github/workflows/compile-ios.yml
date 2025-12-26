@@ -24,6 +24,12 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Prepare CI diagnostics directory
+      run: |
+        echo "Preparing diagnostics directory at ${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs"
+        mkdir -p "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs"
+        chmod -R a+rw "${GITHUB_WORKSPACE}/tmp_ci_diagnostics" || true
+
     - name: Verify runner architecture is Apple Silicon (arm64)
       run: |
         echo "uname -m: $(uname -m)"
