@@ -40,6 +40,17 @@ jobs:
           exit 1
         fi
 
+    - name: Select Xcode (informational; prefer 15.3 if available)
+      run: |
+        echo "Requested Xcode version: ${INPUT_XCODE_VERSION:-${{ github.event.inputs.xcode_version }}}"
+        if [ -d "/Applications/Xcode_15.3.app" ]; then
+          echo "Setting DEVELOPER_DIR to Xcode 15.3 installation"
+          export DEVELOPER_DIR="/Applications/Xcode_15.3.app/Contents/Developer"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> $GITHUB_ENV
+        else
+          echo "Xcode 15.3 not found on runner; leaving default Xcode"
+        fi
+
     - name: Setup Conda (python environment)
       uses: conda-incubator/setup-miniconda@v3
       with:
@@ -627,27 +638,92 @@ jobs:
         set -x
         find output -type f \( -name 'lib0.o' -o -name '*devc*.o' -o -name '*_devc.o' \) -print > found_objs.txt || true
         if [ ! -s found_objs.txt ]; then
-          echo "No devc-style object found in output directory; attempting to create fallback object" >> "$LOGDIR/prepare_libs.log" || true
-          mkdir -p output/ci_fallback
-          if [ -f .github/patches/ci_force_link_jsonffi.c ]; then
-            echo "Compiling fallback force-link object from .github/patches/ci_force_link_jsonffi.c" >> "$LOGDIR/prepare_libs.log" || true
-            clang -c .github/patches/ci_force_link_jsonffi.c -o output/ci_fallback/ci_force_link_jsonffi.o 2>> "$LOGDIR/prepare_libs.log" || true
-            if [ -f output/ci_fallback/ci_force_link_jsonffi.o ]; then
-              echo "Fallback object created; adding to found_objs.txt" >> "$LOGDIR/prepare_libs.log" || true
-              echo output/ci_fallback/ci_force_link_jsonffi.o > found_objs.txt
-            else
-              echo "Fallback object compile failed; no devc-style object available" >> "$LOGDIR/prepare_libs.log" || true
-              echo "ERROR: No devc-style object found in output directory." >&2
-              echo "All output files:" >&2
-              ls -la output || true
-              exit 1
+          echo "No devc-style object found in output directory; attempting to locate in model artifacts and create fallback object" >> "$LOGDIR/prepare_libs.log" || true
+
+          # First try: extract any .o files from model tar (if present)
+          mkdir -p output/tmp_extracted_objs output/ci_fallback
+          if [ -f output/model-iphone.tar ]; then
+            echo "Inspecting output/model-iphone.tar for .o files" >> "$LOGDIR/prepare_libs.log" || true
+            tar -tf output/model-iphone.tar | egrep '\.o$' | sed -n '1,200p' >> "$LOGDIR/prepare_libs.log" || true
+            tar -xf output/model-iphone.tar -C output/tmp_extracted_objs $(tar -tf output/model-iphone.tar | egrep '\.o$' | sed -n '1,200p') 2>> "$LOGDIR/prepare_libs.log" || true
+            if find output/tmp_extracted_objs -type f -name '*.o' | read; then
+              find output/tmp_extracted_objs -type f -name '*.o' -print > found_objs.txt || true
+              echo "Extracted .o files from model tar and added to found_objs.txt" >> "$LOGDIR/prepare_libs.log" || true
             fi
-          else
-            echo "No .github/patches/ci_force_link_jsonffi.c present; cannot create fallback object" >> "$LOGDIR/prepare_libs.log" || true
-            echo "ERROR: No devc-style object found in output directory." >&2
-            echo "All output files:" >&2
-            ls -la output || true
-            exit 1
+          fi
+
+          # Second try: extract object files from any .a archives in output
+          for a in $(find output -type f -name '*.a' -print); do
+            echo "Inspecting archive $a" >> "$LOGDIR/prepare_libs.log" || true
+            mkdir -p "$LOGDIR/tmp_ar_extract"
+            (cd "$LOGDIR/tmp_ar_extract" && ar x "$a") >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+            if find "$LOGDIR/tmp_ar_extract" -type f -name '*.o' | read; then
+              find "$LOGDIR/tmp_ar_extract" -type f -name '*.o' -print >> found_objs.txt || true
+              echo "Extracted .o files from archive $a and added to found_objs.txt" >> "$LOGDIR/prepare_libs.log" || true
+            fi
+          done
+
+          # If still empty, compile fallback object from patches
+          if [ ! -s found_objs.txt ]; then
+            if [ -f .github/patches/ci_force_link_jsonffi.c ]; then
+              echo "Compiling fallback force-link object from .github/patches/ci_force_link_jsonffi.c" >> "$LOGDIR/prepare_libs.log" || true
+              clang -c .github/patches/ci_force_link_jsonffi.c -o output/ci_fallback/ci_force_link_jsonffi.o 2>> "$LOGDIR/prepare_libs.log" || true
+              if [ -f output/ci_fallback/ci_force_link_jsonffi.o ]; then
+                echo "Fallback object created; adding to found_objs.txt" >> "$LOGDIR/prepare_libs.log" || true
+                echo output/ci_fallback/ci_force_link_jsonffi.o > found_objs.txt
+              else
+                echo "Fallback object compile failed; attempting to extract libci_force_link_jsonffi.a from model tar or output and test markers" >> "$LOGDIR/prepare_libs.log" || true
+                # Try to find libci_force_link_jsonffi.a in output or inside model tar
+                mkdir -p "$LOGDIR/tmp_lib_extract"
+                if [ -f output/libci_force_link_jsonffi.a ]; then
+                  cp output/libci_force_link_jsonffi.a "$LOGDIR/tmp_lib_extract/" || true
+                fi
+                if [ -f output/model-iphone.tar ]; then
+                  # extract any libci_force_link_jsonffi.a entry if present
+                  tar -tf output/model-iphone.tar | egrep 'libci_force_link_jsonffi\.a$' >/dev/null 2>&1 && \
+                    (mkdir -p "$LOGDIR/tmp_lib_extract" && tar -xf output/model-iphone.tar -C "$LOGDIR/tmp_lib_extract" $(tar -tf output/model-iphone.tar | egrep 'libci_force_link_jsonffi\.a$') ) || true
+                fi
+                if [ -f "$LOGDIR/tmp_lib_extract/libci_force_link_jsonffi.a" ]; then
+                  echo "Found libci_force_link_jsonffi.a; extracting objects and checking markers" >> "$LOGDIR/prepare_libs.log" || true
+                  (cd "$LOGDIR/tmp_lib_extract" && ar x libci_force_link_jsonffi.a ) >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+                  if find "$LOGDIR/tmp_lib_extract" -type f -name '*.o' | read; then
+                    find "$LOGDIR/tmp_lib_extract" -type f -name '*.o' -print > found_objs.txt || true
+                    echo "Extracted objects from libci_force_link_jsonffi.a and added to found_objs.txt" >> "$LOGDIR/prepare_libs.log" || true
+                  fi
+                fi
+                if [ ! -s found_objs.txt ]; then
+                  echo "No devc-style object available after extraction and fallback; failing" >> "$LOGDIR/prepare_libs.log" || true
+                  echo "ERROR: No devc-style object found in output directory." >&2
+                  echo "All output files:" >&2
+                  ls -la output || true
+                  exit 1
+                fi
+              fi
+            else
+              echo "No .github/patches/ci_force_link_jsonffi.c present; attempting to extract libci_force_link_jsonffi.a from model tar or output" >> "$LOGDIR/prepare_libs.log" || true
+              mkdir -p "$LOGDIR/tmp_lib_extract"
+              if [ -f output/libci_force_link_jsonffi.a ]; then
+                cp output/libci_force_link_jsonffi.a "$LOGDIR/tmp_lib_extract/" || true
+              fi
+              if [ -f output/model-iphone.tar ]; then
+                tar -tf output/model-iphone.tar | egrep 'libci_force_link_jsonffi\.a$' >/dev/null 2>&1 && \
+                  (mkdir -p "$LOGDIR/tmp_lib_extract" && tar -xf output/model-iphone.tar -C "$LOGDIR/tmp_lib_extract" $(tar -tf output/model-iphone.tar | egrep 'libci_force_link_jsonffi\.a$') ) || true
+              fi
+              if [ -f "$LOGDIR/tmp_lib_extract/libci_force_link_jsonffi.a" ]; then
+                echo "Found libci_force_link_jsonffi.a; extracting objects and checking markers" >> "$LOGDIR/prepare_libs.log" || true
+                (cd "$LOGDIR/tmp_lib_extract" && ar x libci_force_link_jsonffi.a ) >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+                if find "$LOGDIR/tmp_lib_extract" -type f -name '*.o' | read; then
+                  find "$LOGDIR/tmp_lib_extract" -type f -name '*.o' -print > found_objs.txt || true
+                  echo "Extracted objects from libci_force_link_jsonffi.a and added to found_objs.txt" >> "$LOGDIR/prepare_libs.log" || true
+                fi
+              fi
+              if [ ! -s found_objs.txt ]; then
+                echo "ERROR: No devc-style object found in output directory and no fallback could be created or extracted" >> "$LOGDIR/prepare_libs.log" || true
+                echo "All output files:" >&2
+                ls -la output || true
+                exit 1
+              fi
+            fi
           fi
         fi
         cat found_objs.txt
