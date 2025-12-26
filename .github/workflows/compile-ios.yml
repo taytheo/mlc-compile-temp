@@ -317,6 +317,19 @@ jobs:
             echo "Dumping head of json_ffi_engine.cc to diagnostics" >> "$LOGDIR/prepare_libs.log" || true
             head -n 240 "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" > "$LOGDIR/json_ffi_head.txt" || true
             echo "Checking syntax of json_ffi_engine.cc" >> "$LOGDIR/prepare_libs.log" || true
+            # DEBUG: verify dlpack headers exist in expected include locations
+            for p in "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/dlpack/include" \
+                     "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include" \
+                     "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include" \
+                     "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include"; do
+              echo "Checking $p" >> "$LOGDIR/prepare_libs.log" || true
+              if [ -f "$p/dlpack/dlpack.h" ]; then
+                echo "found $p/dlpack/dlpack.h size: $(wc -c < \"$p/dlpack/dlpack.h\")" >> "$LOGDIR/prepare_libs.log" || true
+                sed -n '1,40p' "$p/dlpack/dlpack.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
+              else
+                echo "missing $p/dlpack/dlpack.h" >> "$LOGDIR/prepare_libs.log" || true
+              fi
+            done
             echo "--- DEBUG: check TVM include dirs for array.h ---" >> "$LOGDIR/prepare_libs.log" || true
             ls -la "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/include" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
             ls -la "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/include" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
