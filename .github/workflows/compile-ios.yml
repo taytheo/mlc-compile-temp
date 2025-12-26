@@ -75,17 +75,17 @@ jobs:
             git -C mlc-llm-source submodule sync --recursive || true
             git -C mlc-llm-source submodule update --init --recursive || true
           fi
-          echo "Submodules list:" > tmp_ci_diagnostics/outputs/submodules_list.txt || true
-          ls -la mlc-llm-source/3rdparty >> tmp_ci_diagnostics/outputs/submodules_list.txt 2>&1 || true
+          echo "Submodules list:" > "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/submodules_list.txt" || true
+          ls -la mlc-llm-source/3rdparty >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/submodules_list.txt" 2>&1 || true
         fi
         if [ -d mlc-llm-source ]; then
           echo "Cloned mlc-llm into mlc-llm-source"
           mkdir -p mlc-llm-source/cpp/json_ffi
           if [ -f mlc-llm/cpp/json_ffi/json_ffi_engine.cc ]; then
-            echo "Using workspace mlc-llm/cpp/json_ffi/json_ffi_engine.cc as source patch" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
+            echo "Using workspace mlc-llm/cpp/json_ffi/json_ffi_engine.cc as source patch" >> "$LOGDIR/prepare_libs.log" || true
             cp mlc-llm/cpp/json_ffi/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
           elif [ -f .github/patches/json_ffi_engine.cc ]; then
-            echo "Using .github/patches/json_ffi_engine.cc as source patch" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
+            echo "Using .github/patches/json_ffi_engine.cc as source patch" >> "$LOGDIR/prepare_libs.log" || true
             cp .github/patches/json_ffi_engine.cc mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc || true
           else
             echo "No local patch found to copy into mlc-llm-source" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
@@ -96,10 +96,10 @@ jobs:
           if [ -f mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc ]; then
             .github/scripts/ensure_force_link_marker.sh mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           else
-            echo "mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc not found; skipping marker append" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            echo "mlc-llm-source/cpp/json_ffi/json_ffi_engine.cc not found; skipping marker append" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           fi
         else
-          echo "No local source checkout cloned" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          echo "No local source checkout cloned" >> "$LOGDIR/prepare_libs.log" || true
         fi
         python3 .github/scripts/show_installed_mlc_llm.py || true
 
@@ -224,7 +224,7 @@ jobs:
           rustup target add aarch64-apple-ios >> "$LOGDIR/prepare_libs.log" 2>&1 || true
 
           echo "Running a quick C++ syntax check on json_ffi source (and replace if invalid)" >> "$LOGDIR/prepare_libs.log" || true
-          echo "Forcing replacement of json_ffi_engine.cc from repository patch (if present)" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          echo "Forcing replacement of json_ffi_engine.cc from repository patch (if present)" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           if [ -f .github/patches/json_ffi_engine.cc ]; then
             echo "Forcing copy of repo patch into mlc-llm-source (overwrite)" >> "$LOGDIR/prepare_libs.log" || true
             mkdir -p "$MLC_LLM_SOURCE_DIR/cpp/json_ffi" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
@@ -245,63 +245,63 @@ jobs:
             if [ -f "${GITHUB_WORKSPACE}/.github/patches/picojson.h" ]; then
               cp "${GITHUB_WORKSPACE}/.github/patches/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
               COPIED=1
-              echo "Copied picojson.h from .github/patches" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              echo "Copied picojson.h from .github/patches" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
             fi
             # Try scripts folder as well (added fallback)
             if [ "$COPIED" -eq 0 ] && [ -f "${GITHUB_WORKSPACE}/.github/scripts/picojson.h" ]; then
               cp "${GITHUB_WORKSPACE}/.github/scripts/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
               COPIED=1
-              echo "Copied picojson.h from .github/scripts" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              echo "Copied picojson.h from .github/scripts" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
             fi
             # Try common local paths in this workspace (absolute)
             if [ "$COPIED" -eq 0 ] && [ -f "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h" ]; then
               cp "${GITHUB_WORKSPACE}/mlc-llm/3rdparty/tvm/3rdparty/picojson/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
               COPIED=1
-              echo "Copied picojson.h from mlc-llm/3rdparty/tvm" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              echo "Copied picojson.h from mlc-llm/3rdparty/tvm" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
             fi
             if [ "$COPIED" -eq 0 ] && [ -f "${GITHUB_WORKSPACE}/third_party/tvm/3rdparty/picojson/picojson.h" ]; then
-              cp "${GITHUB_WORKSPACE}/third_party/tvm/3rdparty/picojson/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+              cp "${GITHUB_WORKSPACE}/third_party/tvm/3rdparty/picojson/picojson.h" "$MLC_LLM_SOURCE_DIR/3rdparty/picojson/picojson.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
               COPIED=1
-              echo "Copied picojson.h from third_party/tvm" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              echo "Copied picojson.h from third_party/tvm" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
             fi
             if [ "$COPIED" -eq 0 ]; then
-              echo "No picojson fallback found in known locations; skipping" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              echo "No picojson fallback found in known locations; skipping" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
             fi
           fi
 
           # Ensure dlpack header exists for tvm includes (force-copy fallbacks to multiple locations)
-          echo "Ensuring dlpack fallback present in target locations" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-          mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-          mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          echo "Ensuring dlpack fallback present in target locations" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
+          mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
+          mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
+          mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
           COPIED_DL=0
           if [ -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" ]; then
-            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
+            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack/dlpack.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
+            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack/dlpack.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
             COPIED_DL=1
-            echo "Force-copied dlpack.h to tvm-ffi, 3rdparty/dlpack, and xgrammar locations" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            echo "Force-copied dlpack.h to tvm-ffi, 3rdparty/dlpack, and xgrammar locations" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           fi
           # Also ensure scripts copy exists for visibility
           if [ -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" ] && [ ! -f "${GITHUB_WORKSPACE}/.github/scripts/dlpack.h" ]; then
-            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "${GITHUB_WORKSPACE}/.github/scripts/dlpack.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
-            echo "Wrote scripts/dlpack.h fallback copy" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "${GITHUB_WORKSPACE}/.github/scripts/dlpack.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
+            echo "Wrote scripts/dlpack.h fallback copy" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           fi
           if [ "$COPIED_DL" -eq 0 ]; then
-            echo "No dlpack fallback found in .github/patches; skipping dlpack population" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+            echo "No dlpack fallback found in .github/patches; skipping dlpack population" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           fi
           fi
 
           # DEBUG: record patches/scripts folder listing and git status for diagnostics
-          echo "--- DEBUG: Listing .github/patches and .github/scripts ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+          echo "--- DEBUG: Listing .github/patches and .github/scripts ---" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           ls -la "${GITHUB_WORKSPACE}/.github/patches" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
           ls -la "${GITHUB_WORKSPACE}/.github/scripts" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
           echo "--- DEBUG: git ls-files for picojson.h and json_ffi_engine.cc ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          git -C "${GITHUB_WORKSPACE}" ls-files | grep -E "\.github/(patches|scripts)/picojson.h|json_ffi_engine.cc" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          git -C "${GITHUB_WORKSPACE}" ls-files | grep -E "\.github/(patches|scripts)/picojson.h|json_ffi_engine.cc" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
           echo "--- DEBUG: git log for picojson.h ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          git -C "${GITHUB_WORKSPACE}" log -n 5 --pretty=oneline -- .github/patches/picojson.h >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          git -C "${GITHUB_WORKSPACE}" log -n 5 --pretty=oneline -- .github/patches/picojson.h >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
           echo "--- DEBUG: cat .github/patches/picojson.h (first 40 lines) ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-          sed -n '1,40p' "${GITHUB_WORKSPACE}/.github/patches/picojson.h" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1 || true
+          sed -n '1,40p' "${GITHUB_WORKSPACE}/.github/patches/picojson.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
           echo "--- DEBUG END ---" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
 
           if [ -f "$MLC_LLM_SOURCE_DIR/cpp/json_ffi/json_ffi_engine.cc" ]; then
@@ -405,10 +405,10 @@ jobs:
             if cmake --build build --target install --config Release -j >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log 2>&1; then
               echo "Install succeeded" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             else
-              echo "Install FAILED; collecting verbose ninja output" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              echo "Install FAILED; collecting verbose ninja output" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
               ninja -C build -v > ../../tmp_ci_diagnostics/outputs/ninja_verbose_install.txt 2>&1 || true
               tail -n 200 ../../tmp_ci_diagnostics/outputs/ninja_verbose_install.txt >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
-              echo "Install failed; continuing to fallback steps" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              echo "Install failed; continuing to fallback steps" >> "$LOGDIR/prepare_libs.log" || true
             fi
           else
             echo "Skipping install because build failed; proceeding to fallback steps" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
@@ -420,6 +420,7 @@ jobs:
           echo "Listing $BUILD_LIB_DIR (if any):" > tmp_ci_diagnostics/outputs/build_lib_list.txt || true
           ls -la "$BUILD_LIB_DIR" >> tmp_ci_diagnostics/outputs/build_lib_list.txt 2>&1 || true
 
+          mkdir -p output || true
           if [ -d "$BUILD_LIB_DIR" ]; then
             echo "Appending built libs to output/model-iphone.tar"
             for f in mlc-llm-source/build/lib/*; do
