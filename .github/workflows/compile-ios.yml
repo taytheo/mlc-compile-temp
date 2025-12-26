@@ -279,8 +279,11 @@ jobs:
             cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
             cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/dlpack/include/dlpack/dlpack.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
             cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/xgrammar/3rdparty/dlpack/include/dlpack/dlpack.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
+            # Also populate tvm/3rdparty/dlpack include which some builds reference directly
+            mkdir -p "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/dlpack/include/dlpack" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
+            cp -f "${GITHUB_WORKSPACE}/.github/patches/dlpack.h" "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/dlpack/include/dlpack/dlpack.h" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" 2>&1 || true
             COPIED_DL=1
-            echo "Force-copied dlpack.h to tvm-ffi, 3rdparty/dlpack, and xgrammar locations" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
+            echo "Force-copied dlpack.h to tvm-ffi, 3rdparty/dlpack, xgrammar, and tvm/3rdparty/dlpack locations" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
             # DEBUG: dump the contents and sizes of the target dlpack headers to aid diagnostics
             echo "--- HEAD of tvm-ffi dlpack.h ---" >> "$LOGDIR/prepare_libs.log" || true
             sed -n '1,120p' "$MLC_LLM_SOURCE_DIR/3rdparty/tvm/3rdparty/tvm-ffi/3rdparty/dlpack/include/dlpack/dlpack.h" >> "$LOGDIR/prepare_libs.log" 2>&1 || true
@@ -525,6 +528,30 @@ jobs:
         path: tmp_debug_dump/
         retention-days: 7
         if-no-files-found: warn
+
+    - name: Append fallback libs to compiled model tar (post-compile)
+      if: always()
+      run: |
+        LOGDIR="${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs"
+        mkdir -p "$LOGDIR"
+        echo "Checking for fallback libs to append to output/model-iphone.tar" >> "$LOGDIR/prepare_libs.log" || true
+        if [ -f output/model-iphone.tar ]; then
+          if [ -f output/ci_fallback/libci_force_link_jsonffi.a ]; then
+            echo "Found fallback lib; ensuring it's present in tar." >> "$LOGDIR/prepare_libs.log" || true
+            if tar -tf output/model-iphone.tar | grep -q "libci_force_link_jsonffi.a"; then
+              echo "Fallback lib already present in tar; skipping" >> "$LOGDIR/prepare_libs.log" || true
+            else
+              echo "Appending fallback lib to tar" >> "$LOGDIR/prepare_libs.log" || true
+              tar -rf output/model-iphone.tar -C output/ci_fallback libci_force_link_jsonffi.a >> "$LOGDIR/prepare_libs.log" 2>&1 || (echo "tar append failed; attempting create" >> "$LOGDIR/prepare_libs.log" && tar -cf output/model-iphone.tar -C output/ci_fallback libci_force_link_jsonffi.a >> "$LOGDIR/prepare_libs.log" 2>&1) || true
+            fi
+          else
+            echo "No fallback lib found to append" >> "$LOGDIR/prepare_libs.log" || true
+          fi
+          echo "Tar contents after potential append:" >> "$LOGDIR/prepare_libs.log" || true
+          tar -tf output/model-iphone.tar | sed -n '1,200p' >> "$LOGDIR/prepare_libs.log" || true
+        else
+          echo "No output/model-iphone.tar found to append to" >> "$LOGDIR/prepare_libs.log" || true
+        fi
 
     - name: "CI diagnostics: scan logs, debug-dump, and tmp dirs for jsonffi markers"
       run: |
