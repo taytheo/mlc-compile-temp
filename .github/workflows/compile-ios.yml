@@ -290,7 +290,6 @@ jobs:
           if [ "$COPIED_DL" -eq 0 ]; then
             echo "No dlpack fallback found in .github/patches; skipping dlpack population" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           fi
-          fi
 
           # DEBUG: record patches/scripts folder listing and git status for diagnostics
           echo "--- DEBUG: Listing .github/patches and .github/scripts ---" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
@@ -406,8 +405,8 @@ jobs:
               echo "Install succeeded" >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
             else
               echo "Install FAILED; collecting verbose ninja output" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
-              ninja -C build -v > ../../tmp_ci_diagnostics/outputs/ninja_verbose_install.txt 2>&1 || true
-              tail -n 200 ../../tmp_ci_diagnostics/outputs/ninja_verbose_install.txt >> ../../tmp_ci_diagnostics/outputs/prepare_libs.log || true
+              ninja -C build -v > "$LOGDIR/ninja_verbose_install.txt" 2>&1 || true
+              tail -n 200 "$LOGDIR/ninja_verbose_install.txt" >> "$LOGDIR/prepare_libs.log" || true
               echo "Install failed; continuing to fallback steps" >> "$LOGDIR/prepare_libs.log" || true
             fi
           else
@@ -474,7 +473,7 @@ jobs:
             fi
           fi
         else
-          echo "mlc-llm-source not present; skipping iOS lib build/append" > tmp_ci_diagnostics/outputs/build_lib_list.txt
+          echo "mlc-llm-source not present; skipping iOS lib build/append" > "$LOGDIR/build_lib_list.txt"
         fi
         echo "Copying diagnostics to tmp_ci_diagnostics for upload"
         ls -la "$LOGDIR" || true
