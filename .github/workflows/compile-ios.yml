@@ -634,6 +634,9 @@ jobs:
 
     - name: Verify presence and names of lib/devc objects (with fallback)
       run: |
+        # Ensure LOGDIR is defined for this step (avoid accidental writes to /prepare_libs.log when undefined)
+        LOGDIR="${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs"
+        mkdir -p "$LOGDIR" || true
         echo "Searching for lib0.o and devc-style object files..."
         set -x
         find output -type f \( -name 'lib0.o' -o -name '*devc*.o' -o -name '*_devc.o' \) -print > found_objs.txt || true
