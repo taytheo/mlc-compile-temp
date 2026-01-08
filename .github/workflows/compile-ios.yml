@@ -202,7 +202,7 @@ jobs:
         echo "Downloading model: ${{ github.event.inputs.model_repo }}"
         python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='${{ github.event.inputs.model_repo }}', local_dir='./model_weights/target')"
 
-    - name: Copy and adjust config for iOS (prefill=32, context=1024)
+    - name: Copy and adjust config for iOS (prefill=32, context=1024, GPU-only + mmap + shards)
       run: |
         # update_mlc_config.py expects the model path layout used in other workflows; copy into the expected dir
         mkdir -p model_weights/Qwen3-4B-q4f16_1-MLC
@@ -210,7 +210,12 @@ jobs:
         if [ -d model_weights/target ]; then
           cp -R model_weights/target/* model_weights/Qwen3-4B-q4f16_1-MLC/ || true
         fi
+        # Update base config (context=1024, prefill=32)
         python3 .github/scripts/update_mlc_config.py
+        # Apply GPU-specific shard config (GPU-only Metal, mmap-ready)
+        python3 .github/scripts/set_gpu_shard_config.py ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json || true
+        echo "=== Final mlc-chat-config.json ==="
+        cat ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json || true
 
     - name: Debug mlc_llm package layout
       run: |
@@ -516,17 +521,28 @@ jobs:
         echo "Copying diagnostics to tmp_ci_diagnostics for upload"
         ls -la "$LOGDIR" || true
 
-    - name: Compile for iPhone (with debug-dump, prefer local source)
+    - name: Compile for iPhone (GPU-only Metal + mmap + shards, with debug-dump)
       run: |
         mkdir -p output tmp_debug_dump
-        echo "=== Starting mlc_llm compile (with --debug-dump) ==="
+        echo "=== Starting mlc_llm compile (GPU-only Metal + mmap + shards, debug-dump enabled) ==="
+        echo "Target: iPhone GPU (Metal)"
+        echo "Config: context_window_size=1024, prefill_chunk_size=32"
+        echo "Optimization: GPU-only, mmap enabled for dynamic shard loading (~74 shards, load ~37 at runtime)"
+        # Compile command with explicit overrides and opt flags
+        # --overrides: explicitly set context/prefill/shards
+        # --opt: GPU-only Metal (no CPU fallback), use mmap for shard loading
+        COMPILE_CMD="python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json \
+          --device iphone \
+          --overrides 'context_window_size=1024;prefill_chunk_size=32;tensor_parallel_shards=1;max_batch_size=1' \
+          --output ./output/model-iphone.tar \
+          --debug-dump ./tmp_debug_dump"
         # If we have a local source checkout, prefer it by adding it to PYTHONPATH.
         if [ -d mlc-llm-source ]; then
           echo "Using local mlc-llm-source in PYTHONPATH"
-          PYTHONPATH=./mlc-llm-source:./mlc-llm-source/src python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+          PYTHONPATH=./mlc-llm-source:./mlc-llm-source/src eval $COMPILE_CMD 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
         else
           echo "No local source; using installed mlc-llm"
-          python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json --device iphone --output ./output/model-iphone.tar --debug-dump ./tmp_debug_dump 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
+          eval $COMPILE_CMD 2>&1 | tee compile_log.txt || (cat compile_log.txt && exit 1)
           # Ensure output tar exists before attempting append steps later
           if [ ! -f output/model-iphone.tar ]; then
             echo "Model output tar not created by compile step" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
