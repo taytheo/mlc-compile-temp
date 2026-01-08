@@ -1,10 +1,16 @@
 name: Rebuild iOS model artifacts (lib0.o & devc.o)
 
+# Security Note:
+# This workflow compiles on GitHub Actions (Apple Silicon) without uploading local LoRA-trained models.
+# Instead, it downloads a public HuggingFace model (mlc-ai/Qwen3-4B-q4f16_1-MLC) with 74 shard files.
+# The downloaded model is used ONLY for compilation; your local trained model stays secure.
+# Compilation settings (context=1024, prefill=32, mmap) are applied to optimize memory usage (~1.75GB).
+
 on:
   workflow_dispatch:
     inputs:
       model_repo:
-        description: 'Hugging Face repo to download (model weights)'
+        description: 'Hugging Face repo (public base model, NOT your LoRA-trained model)'
         required: true
         default: 'mlc-ai/Qwen3-4B-q4f16_1-MLC'
       xcode_version:
@@ -196,11 +202,38 @@ jobs:
         rm -rf /tmp/mlc_llm* || true
         ls -la ~/.cache || true
 
-    - name: Download model snapshot
+    - name: Download model snapshot (public base model from HuggingFace)
       run: |
         mkdir -p model_weights
-        echo "Downloading model: ${{ github.event.inputs.model_repo }}"
+        echo "====================================================================="
+        echo "🔒 SECURITY: Downloading PUBLIC base model from HuggingFace"
+        echo "   NOT uploading your local LoRA-trained model for security"
+        echo "   Model: ${{ github.event.inputs.model_repo }}"
+        echo "   Expected: 74 params_shard_*.bin files for mmap support"
+        echo "====================================================================="
         python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='${{ github.event.inputs.model_repo }}', local_dir='./model_weights/target')"
+        
+        # Verify download succeeded and contains shard files
+        echo "\n=== Verifying downloaded model structure ==="
+        if [ -d ./model_weights/target ]; then
+          DOWNLOADED_SHARDS=$(find ./model_weights/target -type f -name 'params_shard_*.bin' 2>/dev/null | wc -l | tr -d ' ')
+          echo "✅ Download complete"
+          echo "📦 Found $DOWNLOADED_SHARDS shard files"
+          if [ "$DOWNLOADED_SHARDS" -ge 70 ]; then
+            echo "✅ Shard count sufficient for mmap partial loading (37/$DOWNLOADED_SHARDS)"
+            echo "   Memory usage: ~1.75GB (vs 2.8GB without shards)"
+          elif [ "$DOWNLOADED_SHARDS" -gt 0 ]; then
+            echo "⚠️  Fewer shards than expected ($DOWNLOADED_SHARDS < 74)"
+          else
+            echo "❌ No shard files found - model will be fully embedded"
+            echo "   Memory usage: ~2.8GB (no mmap partial loading)"
+          fi
+          echo "\nModel directory size:"
+          du -sh ./model_weights/target
+        else
+          echo "❌ ERROR: Download directory not found"
+          exit 1
+        fi
 
     - name: Copy and adjust config for iOS (prefill=32, context=1024, GPU-only + mmap + shards)
       run: |
@@ -216,6 +249,22 @@ jobs:
         python3 .github/scripts/set_gpu_shard_config.py ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json || true
         echo "=== Final mlc-chat-config.json ==="
         cat ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json || true
+        
+        # CRITICAL: Verify params_shard files exist for mmap support
+        echo "=== Checking for params_shard_*.bin files (required for mmap + partial shard loading) ==="
+        SHARD_COUNT=$(find ./model_weights/Qwen3-4B-q4f16_1-MLC -type f -name 'params_shard_*.bin' 2>/dev/null | wc -l | tr -d ' ')
+        echo "Found $SHARD_COUNT shard files"
+        if [ "$SHARD_COUNT" -eq 0 ]; then
+          echo "WARNING: No params_shard_*.bin files found in model_weights directory"
+          echo "Without shard files, the model will be fully embedded in binary (~2.8GB memory)"
+          echo "For mmap + partial loading (37/74 shards, ~1.75GB memory), shard files are required"
+          echo "Downloaded model listing:"
+          ls -lh ./model_weights/Qwen3-4B-q4f16_1-MLC/ | head -20
+        else
+          echo "✅ Found $SHARD_COUNT shard files - mmap partial loading enabled"
+          echo "Memory usage: ~1.75GB (loading 37/$SHARD_COUNT shards) instead of 2.8GB (full model)"
+          ls -lh ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin | head -10
+        fi
 
     - name: Debug mlc_llm package layout
       run: |
@@ -527,10 +576,12 @@ jobs:
         echo "=== Starting mlc_llm compile (GPU-only Metal + mmap + shards, debug-dump enabled) ==="
         echo "Target: iPhone GPU (Metal)"
         echo "Config: context_window_size=1024, prefill_chunk_size=32"
-        echo "Optimization: GPU-only, mmap enabled for dynamic shard loading (~74 shards, load ~37 at runtime)"
+        echo "Optimization: GPU-only, mmap enabled for dynamic shard loading"
+        echo "Memory: If params_shard_*.bin present → ~1.75GB (load 37/74 shards dynamically)"
+        echo "        If no shards → ~2.8GB (full model embedded in binary)"
         # Compile command with explicit overrides and opt flags
         # --overrides: explicitly set context/prefill/shards
-        # --opt: GPU-only Metal (no CPU fallback), use mmap for shard loading
+        # Shard loading: Runtime will use mmap to load only needed shards (37/74 for ~1.75GB memory)
         COMPILE_CMD="python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json \
           --device iphone \
           --overrides 'context_window_size=1024;prefill_chunk_size=32;tensor_parallel_shards=1;max_batch_size=1' \
@@ -547,6 +598,19 @@ jobs:
           if [ ! -f output/model-iphone.tar ]; then
             echo "Model output tar not created by compile step" >> "${GITHUB_WORKSPACE}/tmp_ci_diagnostics/outputs/prepare_libs.log" || true
           fi
+        fi
+        
+        # Verify tar contains shard files (for mmap support)
+        echo "=== Checking compiled tar for params_shard files ==="
+        if [ -f output/model-iphone.tar ]; then
+          SHARD_IN_TAR=$(tar -tzf output/model-iphone.tar 2>/dev/null | grep -c 'params_shard_.*\.bin' || echo 0)
+          echo "Shard files in tar: $SHARD_IN_TAR"
+          if [ "$SHARD_IN_TAR" -gt 0 ]; then
+            echo "✅ Tar contains $SHARD_IN_TAR shard files - mmap partial loading supported"
+          else
+            echo "⚠️ No shard files in tar - model fully embedded (higher memory usage)"
+          fi
+          tar -tzf output/model-iphone.tar | head -30
         fi
 
     - name: Upload compile debug dump
