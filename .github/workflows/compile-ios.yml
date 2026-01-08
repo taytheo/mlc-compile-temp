@@ -603,10 +603,23 @@ jobs:
         # Verify tar contains shard files (for mmap support)
         echo "=== Checking compiled tar for params_shard files ==="
         if [ -f output/model-iphone.tar ]; then
-          SHARD_IN_TAR=$(tar -tzf output/model-iphone.tar 2>/dev/null | grep -c 'params_shard_.*\.bin' || echo 0)
+          # Check if tar is compressed
+          if file output/model-iphone.tar | grep -q "gzip"; then
+            echo "ℹ️ Tar is compressed (gzip) - cannot append directly"
+            IS_COMPRESSED=true
+            TAR_LIST_CMD="tar -tzf"
+          else
+            echo "ℹ️ Tar is uncompressed - can append directly"
+            IS_COMPRESSED=false
+            TAR_LIST_CMD="tar -tf"
+          fi
+          
+          SHARD_IN_TAR=$($TAR_LIST_CMD output/model-iphone.tar 2>/dev/null | grep -c 'params_shard_.*\.bin' || echo 0)
           echo "Shard files in tar: $SHARD_IN_TAR"
+          
           if [ "$SHARD_IN_TAR" -gt 0 ]; then
             echo "✅ Tar contains $SHARD_IN_TAR shard files - mmap partial loading supported"
+            echo "   Memory: ~1.75GB (loads 37/$SHARD_IN_TAR shards dynamically)"
           else
             echo "⚠️ No shard files in tar - adding them manually for mmap support"
             # MLC compile doesn't include shard files by default - add them manually
@@ -614,18 +627,39 @@ jobs:
               SHARD_COUNT=$(find ./model_weights/Qwen3-4B-q4f16_1-MLC -type f -name 'params_shard_*.bin' 2>/dev/null | wc -l | tr -d ' ')
               if [ "$SHARD_COUNT" -gt 0 ]; then
                 echo "📦 Adding $SHARD_COUNT shard files to tar for mmap support..."
-                # Add shard files to existing tar
-                tar -rf output/model-iphone.tar -C ./model_weights/Qwen3-4B-q4f16_1-MLC params_shard_*.bin 2>&1 || \
-                  echo "Warning: Failed to append shard files to tar"
+                
+                if [ "$IS_COMPRESSED" = true ]; then
+                  echo "🔧 Extracting compressed tar, adding shards, then recreating..."
+                  
+                  # Create temp directory for extraction
+                  mkdir -p tmp_tar_extract
+                  tar -xzf output/model-iphone.tar -C tmp_tar_extract
+                  
+                  # Copy shard files to extraction directory
+                  cp ./model_weights/Qwen3-4B-q4f16_1-MLC/params_shard_*.bin tmp_tar_extract/
+                  
+                  # Recreate tar with all files (uncompressed)
+                  tar -cf output/model-iphone.tar -C tmp_tar_extract .
+                  
+                  # Clean up
+                  rm -rf tmp_tar_extract
+                  
+                  echo "✅ Recreated tar with shard files"
+                else
+                  # Append to uncompressed tar directly
+                  tar -rf output/model-iphone.tar -C ./model_weights/Qwen3-4B-q4f16_1-MLC params_shard_*.bin
+                  echo "✅ Appended shard files to tar"
+                fi
+                
                 # Verify addition
-                SHARD_AFTER=$(tar -tzf output/model-iphone.tar 2>/dev/null | grep -c 'params_shard_.*\.bin' || echo 0)
+                SHARD_AFTER=$(tar -tf output/model-iphone.tar 2>/dev/null | grep -c 'params_shard_.*\.bin' || echo 0)
                 if [ "$SHARD_AFTER" -gt 0 ]; then
                   echo "✅ Successfully added $SHARD_AFTER shard files to tar"
                   echo "   Memory: ~1.75GB (mmap loads 37/$SHARD_AFTER shards dynamically)"
                   TAR_SIZE=$(du -sh output/model-iphone.tar | awk '{print $1}')
                   echo "   Tar size: $TAR_SIZE"
                 else
-                  echo "❌ Failed to add shard files"
+                  echo "❌ Failed to add shard files (found $SHARD_AFTER in tar)"
                 fi
               else
                 echo "❌ No shard files found in model directory - model will be fully embedded (2.8GB)"
@@ -633,7 +667,7 @@ jobs:
             fi
           fi
           echo "=== Final tar contents (first 50 entries) ==="
-          tar -tzf output/model-iphone.tar | head -50
+          tar -tf output/model-iphone.tar | head -50
         fi
 
     - name: Upload compile debug dump
