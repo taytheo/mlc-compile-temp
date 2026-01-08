@@ -608,9 +608,32 @@ jobs:
           if [ "$SHARD_IN_TAR" -gt 0 ]; then
             echo "✅ Tar contains $SHARD_IN_TAR shard files - mmap partial loading supported"
           else
-            echo "⚠️ No shard files in tar - model fully embedded (higher memory usage)"
+            echo "⚠️ No shard files in tar - adding them manually for mmap support"
+            # MLC compile doesn't include shard files by default - add them manually
+            if [ -d ./model_weights/Qwen3-4B-q4f16_1-MLC ]; then
+              SHARD_COUNT=$(find ./model_weights/Qwen3-4B-q4f16_1-MLC -type f -name 'params_shard_*.bin' 2>/dev/null | wc -l | tr -d ' ')
+              if [ "$SHARD_COUNT" -gt 0 ]; then
+                echo "📦 Adding $SHARD_COUNT shard files to tar for mmap support..."
+                # Add shard files to existing tar
+                tar -rf output/model-iphone.tar -C ./model_weights/Qwen3-4B-q4f16_1-MLC params_shard_*.bin 2>&1 || \
+                  echo "Warning: Failed to append shard files to tar"
+                # Verify addition
+                SHARD_AFTER=$(tar -tzf output/model-iphone.tar 2>/dev/null | grep -c 'params_shard_.*\.bin' || echo 0)
+                if [ "$SHARD_AFTER" -gt 0 ]; then
+                  echo "✅ Successfully added $SHARD_AFTER shard files to tar"
+                  echo "   Memory: ~1.75GB (mmap loads 37/$SHARD_AFTER shards dynamically)"
+                  TAR_SIZE=$(du -sh output/model-iphone.tar | awk '{print $1}')
+                  echo "   Tar size: $TAR_SIZE"
+                else
+                  echo "❌ Failed to add shard files"
+                fi
+              else
+                echo "❌ No shard files found in model directory - model will be fully embedded (2.8GB)"
+              fi
+            fi
           fi
-          tar -tzf output/model-iphone.tar | head -30
+          echo "=== Final tar contents (first 50 entries) ==="
+          tar -tzf output/model-iphone.tar | head -50
         fi
 
     - name: Upload compile debug dump
