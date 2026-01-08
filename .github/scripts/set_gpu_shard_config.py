@@ -40,10 +40,12 @@ def main():
 
     cfg.setdefault('model_config', {})
 
-    # GPU-friendly defaults (conservative for iPhone Metal)
+    # GPU-friendly defaults optimized for iPhone Metal with ~74 shards (load ~37 at once)
+    # Use shard=1 for compile (model already has 74 weight shards)
+    # mmap will load shards dynamically at runtime
     cfg['model_config'].setdefault('tensor_parallel_shards', 1)
-    cfg['model_config'].setdefault('prefill_chunk_size', 128)
-    cfg['model_config'].setdefault('context_window_size', 4096)
+    cfg['model_config'].setdefault('prefill_chunk_size', 32)  # Reduced for memory efficiency
+    cfg['model_config'].setdefault('context_window_size', 1024)  # Reduced for memory efficiency
     cfg['model_config'].setdefault('max_batch_size', 1)
     cfg['model_config'].setdefault('dtype', 'float16')
 
