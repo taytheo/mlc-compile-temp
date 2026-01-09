@@ -575,7 +575,7 @@ jobs:
         mkdir -p output tmp_debug_dump
         echo "=== Starting mlc_llm compile (GPU-only Metal + mmap + shards, debug-dump enabled) ==="
         echo "Target: iPhone GPU (Metal)"
-        echo "Config: context_window_size=1024, prefill_chunk_size=32"
+        echo "Config: context_window_size=768, prefill_chunk_size=32"
         echo "Optimization: GPU-only, mmap enabled for dynamic shard loading"
         echo "Memory: If params_shard_*.bin present → ~1.75GB (load 37/74 shards dynamically)"
         echo "        If no shards → ~2.8GB (full model embedded in binary)"
@@ -584,7 +584,7 @@ jobs:
         # Shard loading: Runtime will use mmap to load only needed shards (37/74 for ~1.75GB memory)
         COMPILE_CMD="python -m mlc_llm compile ./model_weights/Qwen3-4B-q4f16_1-MLC/mlc-chat-config.json \
           --device iphone \
-          --overrides 'context_window_size=1024;prefill_chunk_size=32;tensor_parallel_shards=1;max_batch_size=1' \
+          --overrides 'context_window_size=768;prefill_chunk_size=32;tensor_parallel_shards=1;max_batch_size=1' \\
           --output ./output/model-iphone.tar \
           --debug-dump ./tmp_debug_dump"
         # If we have a local source checkout, prefer it by adding it to PYTHONPATH.
